@@ -155,13 +155,14 @@ def test_finance_agent_happy_path_extraction(mock_genai):
     
     assert res["status"] == "success"
     assert res["task_id"] == "T-101"
-    assert res["delay_days"] == 5
+    assert res["delay_days_used"] == 5
     assert res["delay_source"] == "extracted_from_text"
-    assert res["assigned_crew"] == "L&T Construction"
-    assert res["project_delay"] == 5
-    assert res["total_financial_exposure"] > 0
-    assert "exposure" in res["brief"].lower() or "financial" in res["brief"].lower()
-    assert res["parse_error"] is False
+    assert res["cpm_result"]["assigned_crew"] == "L&T Construction"
+    assert res["cpm_result"]["project_delay"] == 5
+    assert res["cpm_result"]["total_financial_exposure"] > 0
+    assert "exposure" in res["summary"].lower() or "financial" in res["summary"].lower()
+    assert res["cpm_result"]["parse_error"] is False
+    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
 
 @patch('backend.agents.finance_agent.genai.Client')
 def test_finance_agent_happy_path_fallback(mock_genai):
@@ -185,10 +186,11 @@ def test_finance_agent_happy_path_fallback(mock_genai):
     res = assess_finance(observe_output, "Some event description with no days mentioned.")
     
     assert res["status"] == "success"
-    assert res["delay_days"] == 7
+    assert res["delay_days_used"] == 7
     assert res["delay_source"] == "severity_fallback"
-    assert res["project_delay"] == 7
-    assert res["parse_error"] is False
+    assert res["cpm_result"]["project_delay"] == 7
+    assert res["cpm_result"]["parse_error"] is False
+    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
 
 def test_finance_agent_insufficient_data():
     observe_output = {
@@ -203,8 +205,9 @@ def test_finance_agent_insufficient_data():
     
     assert res["status"] == "insufficient_data"
     assert res["task_id"] is None
-    assert res["total_financial_exposure"] is None
-    assert "skipped" in res["brief"].lower() or "no task" in res["brief"].lower()
+    assert res["cpm_result"]["total_financial_exposure"] is None
+    assert "skipped" in res["summary"].lower() or "no task" in res["summary"].lower()
+    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
 
 def test_finance_agent_parse_error_halt():
     observe_output = {
@@ -215,9 +218,11 @@ def test_finance_agent_parse_error_halt():
         "parse_error": True
     }
     res = assess_finance(observe_output)
-    assert res["parse_error"] is True
     assert res["status"] == "error"
-    assert "observe agent failed" in res["brief"].lower()
+    assert res["cpm_result"]["parse_error"] is True
+    assert "observe agent failed" in res["summary"].lower()
+    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
+
 
 # --- INDEPENDENCE VERIFICATION ---
 

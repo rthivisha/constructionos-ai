@@ -41,21 +41,23 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
         return {
             "status": "error",
             "task_id": None,
-            "delay_days": None,
+            "delay_days_used": None,
             "delay_source": None,
-            "assigned_crew": None,
-            "daily_operating_cost": None,
-            "contractor_penalty_rate": None,
-            "critical_path": None,
-            "baseline_project_duration": None,
-            "new_project_duration": None,
-            "project_delay": None,
-            "total_financial_exposure": None,
-            "breakdown": None,
-            "tasks": None,
-            "brief": "Financial assessment halted: Observe Agent failed to parse the event.",
-            "fallback_mode_active": False,
-            "parse_error": True
+            "cpm_result": {
+                "assigned_crew": None,
+                "daily_operating_cost": None,
+                "contractor_penalty_rate": None,
+                "critical_path": None,
+                "baseline_project_duration": None,
+                "new_project_duration": None,
+                "project_delay": None,
+                "total_financial_exposure": None,
+                "breakdown": None,
+                "tasks": None,
+                "fallback_mode_active": False,
+                "parse_error": True
+            },
+            "summary": "Financial assessment halted: Observe Agent failed to parse the event."
         }
 
     # 2. Handle task_not_matched (insufficient data state)
@@ -65,21 +67,23 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
         return {
             "status": "insufficient_data",
             "task_id": None,
-            "delay_days": None,
+            "delay_days_used": None,
             "delay_source": None,
-            "assigned_crew": None,
-            "daily_operating_cost": None,
-            "contractor_penalty_rate": None,
-            "critical_path": None,
-            "baseline_project_duration": None,
-            "new_project_duration": None,
-            "project_delay": None,
-            "total_financial_exposure": None,
-            "breakdown": None,
-            "tasks": None,
-            "brief": "Financial evaluation skipped: no task was matched in the event report.",
-            "fallback_mode_active": False,
-            "parse_error": False
+            "cpm_result": {
+                "assigned_crew": None,
+                "daily_operating_cost": None,
+                "contractor_penalty_rate": None,
+                "critical_path": None,
+                "baseline_project_duration": None,
+                "new_project_duration": None,
+                "project_delay": None,
+                "total_financial_exposure": None,
+                "breakdown": None,
+                "tasks": None,
+                "fallback_mode_active": False,
+                "parse_error": False
+            },
+            "summary": "Financial evaluation skipped: no task was matched in the event report."
         }
 
     severity = observe_output.get("severity", 1)
@@ -93,21 +97,23 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
         return {
             "status": "error",
             "task_id": task_id,
-            "delay_days": None,
+            "delay_days_used": None,
             "delay_source": None,
-            "assigned_crew": None,
-            "daily_operating_cost": None,
-            "contractor_penalty_rate": None,
-            "critical_path": None,
-            "baseline_project_duration": None,
-            "new_project_duration": None,
-            "project_delay": None,
-            "total_financial_exposure": None,
-            "breakdown": None,
-            "tasks": None,
-            "brief": f"Financial evaluation failed: task ID '{task_id}' not found in active schedule.",
-            "fallback_mode_active": state_fallback,
-            "parse_error": False
+            "cpm_result": {
+                "assigned_crew": None,
+                "daily_operating_cost": None,
+                "contractor_penalty_rate": None,
+                "critical_path": None,
+                "baseline_project_duration": None,
+                "new_project_duration": None,
+                "project_delay": None,
+                "total_financial_exposure": None,
+                "breakdown": None,
+                "tasks": None,
+                "fallback_mode_active": state_fallback,
+                "parse_error": False
+            },
+            "summary": f"Financial evaluation failed: task ID '{task_id}' not found in active schedule."
         }
 
     task_name = task["task_name"]
@@ -160,21 +166,23 @@ If no delay duration is explicitly mentioned in the text, return null.
         return {
             "status": "error",
             "task_id": task_id,
-            "delay_days": delay_days,
+            "delay_days_used": delay_days,
             "delay_source": delay_source,
-            "assigned_crew": None,
-            "daily_operating_cost": None,
-            "contractor_penalty_rate": None,
-            "critical_path": None,
-            "baseline_project_duration": None,
-            "new_project_duration": None,
-            "project_delay": None,
-            "total_financial_exposure": None,
-            "breakdown": None,
-            "tasks": None,
-            "brief": f"Financial evaluation failed: CPM math calculation error: {e}",
-            "fallback_mode_active": state_fallback,
-            "parse_error": False
+            "cpm_result": {
+                "assigned_crew": None,
+                "daily_operating_cost": None,
+                "contractor_penalty_rate": None,
+                "critical_path": None,
+                "baseline_project_duration": None,
+                "new_project_duration": None,
+                "project_delay": None,
+                "total_financial_exposure": None,
+                "breakdown": None,
+                "tasks": None,
+                "fallback_mode_active": state_fallback,
+                "parse_error": False
+            },
+            "summary": f"Financial evaluation failed: CPM math calculation error: {e}"
         }
 
     # 6. Generate financial summary brief using Gemini
@@ -215,19 +223,21 @@ Please write a brief summary explaining these financial impacts. Your narrative 
     return {
         "status": "success",
         "task_id": task_id,
-        "delay_days": delay_days,
+        "delay_days_used": delay_days,
         "delay_source": delay_source,
-        "assigned_crew": impact["assigned_crew"],
-        "daily_operating_cost": impact["daily_operating_cost"],
-        "contractor_penalty_rate": impact["contractor_penalty_rate"],
-        "critical_path": impact["critical_path"],
-        "baseline_project_duration": schedule_result["baseline_project_duration"],
-        "new_project_duration": schedule_result["new_project_duration"],
-        "project_delay": schedule_result["project_delay"],
-        "total_financial_exposure": schedule_result["total_financial_exposure"],
-        "breakdown": schedule_result["breakdown"],
-        "tasks": schedule_result["tasks"],
-        "brief": brief,
-        "fallback_mode_active": schedule_result["fallback_mode_active"] or state_fallback,
-        "parse_error": False
+        "cpm_result": {
+            "assigned_crew": impact["assigned_crew"],
+            "daily_operating_cost": impact["daily_operating_cost"],
+            "contractor_penalty_rate": impact["contractor_penalty_rate"],
+            "critical_path": impact["critical_path"],
+            "baseline_project_duration": schedule_result["baseline_project_duration"],
+            "new_project_duration": schedule_result["new_project_duration"],
+            "project_delay": schedule_result["project_delay"],
+            "total_financial_exposure": schedule_result["total_financial_exposure"],
+            "breakdown": schedule_result["breakdown"],
+            "tasks": schedule_result["tasks"],
+            "fallback_mode_active": schedule_result["fallback_mode_active"] or state_fallback,
+            "parse_error": False
+        },
+        "summary": brief
     }
