@@ -2,7 +2,9 @@ import os
 import tempfile
 import sqlite3
 import pytest
+import json
 from unittest.mock import patch, MagicMock
+
 from fastapi.testclient import TestClient
 
 import backend.db
@@ -18,6 +20,11 @@ from backend.main import app
 from backend.agents.event_types import EventType
 
 client = TestClient(app)
+
+class MockResponse:
+    def __init__(self, text):
+        self.text = text
+
 
 def seed_test_data():
     conn = sqlite3.connect(TEST_DB_PATH)
@@ -230,3 +237,55 @@ def test_pipeline_both_crash_simultaneously(mock_finance, mock_safety, mock_obse
     tradeoff = data["tradeoff_reconciliation"]
     assert tradeoff["decision"] == "halt"
     assert "unavailable" in tradeoff["reasoning"].lower()
+
+@patch('google.genai.Client')
+def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class):
+    mock_client = MagicMock()
+    mock_client_class.return_value = mock_client
+    
+    # Configure mock responses for all Gemini calls in order:
+    # 1. Observe Agent
+    # 2. Safety Agent Compliance Brief
+    # 3. Finance Agent Delay Extraction
+    # 4. Finance Agent Financial Brief
+    # 5. Trade-off Agent Reconciliation Decision
+    mock_client.models.generate_content.side_effect = [
+        MockResponse(json.dumps({
+            "event_type": "excavation",
+            "matched_task_id": "T-102",
+            "severity": 4
+        })),
+        MockResponse("Compliance looks fine, caution advised."),
+        MockResponse(json.dumps({
+            "delay_days": 3
+        })),
+        MockResponse("Project schedule will shift by 3 days with marginal cost."),
+        MockResponse(json.dumps({
+            "decision": "continue",
+            "reasoning": "No safety stop and financial exposure is minor.",
+            "rejected_alternative": "halt",
+            "rejected_because": "cost of halting is higher than continuing."
+        }))
+    ]
+    
+    response = client.post("/api/events", json={"event_text": "Minor soil unstable at drainage excavation."})
+    assert response.status_code == 200
+    
+    data = response.json()
+    
+    # Verify the real, unmocked output schemas were successfully processed and matched
+    assert data["observation"]["event_type"] == "excavation"
+    assert data["observation"]["task_id"] == "T-102"
+    assert data["observation"]["severity"] == 4
+    
+    assert data["safety_assessment"]["hard_stop"] is False
+    assert data["safety_assessment"]["parse_error"] is False
+    
+    assert data["financial_assessment"]["status"] == "success"
+    assert data["financial_assessment"]["delay_days_used"] == 3
+    assert data["financial_assessment"]["delay_source"] == "extracted_from_text"
+    assert data["financial_assessment"]["cpm_result"]["project_delay"] == 3
+    
+    assert data["tradeoff_reconciliation"]["decision"] == "continue"
+    assert data["tradeoff_reconciliation"]["rejected_alternative"] == "halt"
+
