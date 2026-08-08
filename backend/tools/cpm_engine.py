@@ -388,3 +388,148 @@ def recalculate_schedule(halted_task_id: str, delay_days: int) -> Dict[str, Any]
     }
     
     return result
+
+
+def propose_reschedule(cpm_result: Dict[str, Any]) -> Dict[str, Any]:
+    """
+    Extension of the CPM engine: proposes a schedule reschedule by reallocating
+    float/slack from non-critical tasks to absorb a halt delay.
+
+    Rules:
+    - Only considers non-critical tasks (slack > 0) in the delayed schedule.
+    - NEVER reallocates across contractor boundaries — only tasks under the
+      same lead contractor as the halted task are candidates.
+    - Derives delay reduction from the actual computed slack values in the
+      backward pass (cpm_result["tasks"][tid]["delayed"]["slack"]), not a
+      hardcoded constant.
+    - Returns a proposal only. Nothing is written to the database here.
+
+    Args:
+        cpm_result: The dict returned by recalculate_schedule().
+
+    Returns:
+        Dict with keys:
+          - proposed_reschedule: list of shifted_task dicts with status annotations
+          - net_delay_reduction_days: computed int (not assumed)
+          - calculation_detail: str showing the slack arithmetic
+          - feasible: bool — True if at least one day of delay can be recovered
+          - halted_task_id: str, for reference
+    """
+    halted_task_id: str = cpm_result["halted_task_id"]
+    delay_days: int = cpm_result["delay_days"]
+    tasks_info: Dict[str, Dict] = cpm_result.get("tasks", {})
+
+    if delay_days == 0:
+        return {
+            "halted_task_id": halted_task_id,
+            "feasible": False,
+            "net_delay_reduction_days": 0,
+            "calculation_detail": "No delay — no reschedule needed.",
+            "proposed_reschedule": [],
+        }
+
+    # ── Resolve contractor for the halted task ──────────────────────────────
+    state, _ = get_project_state()
+    task_rows = {t["task_id"]: t for t in state.get("schedule_tasks", [])}
+    division_map = {d["id"]: d for d in state.get("divisions", [])}
+
+    halted_row = task_rows.get(halted_task_id)
+    if not halted_row:
+        return {
+            "halted_task_id": halted_task_id,
+            "feasible": False,
+            "net_delay_reduction_days": 0,
+            "calculation_detail": f"Halted task '{halted_task_id}' not found — cannot propose reschedule.",
+            "proposed_reschedule": [],
+        }
+
+    halted_div = division_map.get(halted_row["division_id"], {})
+    halted_contractor: str = halted_div.get("lead_contractor", "")
+
+    # ── Scan non-critical tasks under the same contractor ───────────────────
+    # Candidate: same contractor, is_critical == 0 in the delayed schedule,
+    # and is not the halted task itself.
+    candidates = []
+    for tid, info in tasks_info.items():
+        if tid == halted_task_id:
+            continue
+        delayed = info["delayed"]
+        if delayed["is_critical"] != 0:
+            continue  # skip critical tasks
+
+        task_row = task_rows.get(tid)
+        if not task_row:
+            continue
+        task_div = division_map.get(task_row["division_id"], {})
+        task_contractor = task_div.get("lead_contractor", "")
+
+        if task_contractor != halted_contractor:
+            # Cross-contractor reallocation is never proposed
+            continue
+
+        slack_available: int = int(delayed["slack"])
+        if slack_available <= 0:
+            continue
+
+        candidates.append({
+            "task_id": tid,
+            "task_name": info["task_name"],
+            "contractor": task_contractor,
+            "slack_available": slack_available,
+            "delayed_start": delayed["start"],
+            "delayed_end": delayed["end"],
+        })
+
+    # Sort by descending slack so the best candidates appear first
+    candidates.sort(key=lambda c: c["slack_available"], reverse=True)
+
+    # ── Compute how many delay days can be absorbed ─────────────────────────
+    # We accumulate slack across candidates until we cover delay_days.
+    # Slack from multiple non-critical tasks is additive because they can
+    # each absorb part of the delay independently.
+    remaining_to_cover = delay_days
+    total_recovered = 0
+    calc_lines = [f"Delay to absorb: {delay_days} day(s)"]
+    proposed: List[Dict[str, Any]] = []
+
+    for cand in candidates:
+        if remaining_to_cover <= 0:
+            break
+        absorb = min(cand["slack_available"], remaining_to_cover)
+        total_recovered += absorb
+        remaining_to_cover -= absorb
+
+        calc_lines.append(
+            f"  {cand['task_id']} ({cand['task_name']}) — "
+            f"slack={cand['slack_available']}d, absorbs {absorb}d"
+        )
+        proposed.append({
+            "task_id": cand["task_id"],
+            "task_name": cand["task_name"],
+            "contractor": cand["contractor"],
+            "slack_available": cand["slack_available"],
+            "days_absorbed": absorb,
+            "delayed_start": cand["delayed_start"],
+            "delayed_end": cand["delayed_end"],
+            "status": "proposed_shift",
+        })
+
+    if total_recovered == 0:
+        calc_lines.append("No same-contractor non-critical tasks with available slack found.")
+    else:
+        calc_lines.append(
+            f"Net delay reduction: {total_recovered}d absorbed / {delay_days}d total"
+        )
+        if remaining_to_cover > 0:
+            calc_lines.append(
+                f"  Remaining unabsorbed: {remaining_to_cover}d "
+                f"(insufficient slack within contractor '{halted_contractor}')"
+            )
+
+    return {
+        "halted_task_id": halted_task_id,
+        "feasible": total_recovered > 0,
+        "net_delay_reduction_days": total_recovered,
+        "calculation_detail": "\n".join(calc_lines),
+        "proposed_reschedule": proposed,
+    }

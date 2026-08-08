@@ -5,6 +5,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.db import init_db
 from backend.routes.project_setup import router as project_setup_router
 from backend.routes.events import router as events_router
+from backend.routes.schedule import router as schedule_router
 
 app = FastAPI(title="ConstructionOS AI Backend")
 
@@ -28,6 +29,7 @@ app.add_middleware(
 # Include routers
 app.include_router(project_setup_router)
 app.include_router(events_router)
+app.include_router(schedule_router)
 
 @app.get("/")
 def read_root():
