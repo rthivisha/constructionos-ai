@@ -1,6 +1,6 @@
 import logging
 import json
-from typing import Dict, Any, Optional
+from typing import Dict, Any, List, Optional
 from google import genai
 
 from backend.agents.observe_agent import get_api_key
@@ -17,49 +17,72 @@ _ADVISORY_DISCLAIMER = (
 )
 
 # ---------------------------------------------------------------------------
-# MOCK LLM data for safety agent
+# Mock brief template — interpolates actual hard_stop + triggered_rules values
+# at render time, preventing narrative/decision mismatches structurally.
 # ---------------------------------------------------------------------------
-_MOCK_SAFETY = {
-    "work_at_height": {
-        "brief": (
-            "[MOCK] Safety Compliance Assessment: Tower Crane mechanical failure classified "
-            "as Work at Height (severity 8/10). HARD_STOP issued. BOCW Act Section 40 mandates "
-            "mandatory scaffolding and harness checks for all work above 2 metres. All elevated "
-            "operations must cease immediately until a full engineering inspection and BOCW compliance "
-            "verification is completed. No override is permitted."
-        ),
-        "advisory_considerations": (
-            "- Conduct immediate physical inspection of all harnesses, lanyards, and anchor points before any resumption.\n"
-            "- Verify crane hoist mechanism and wire-rope integrity with a certified lifting equipment engineer.\n"
-            "- Issue a site-wide toolbox talk covering fall-clearance calculations and emergency rescue protocol."
-        ),
-    },
-    "extreme_weather": {
-        "brief": (
-            "[MOCK] Safety Compliance Assessment: Heavy weather event classified as Extreme Weather "
-            "(severity 6/10). HARD_STOP issued. BOCW Act Section 41B and IMD weather threshold protocols "
-            "mandate cessation of all open-site operations during severe weather. Operations suspended until "
-            "meteorological all-clear is confirmed by site supervisor."
-        ),
-        "advisory_considerations": (
-            "- Monitor IMD/NDMA alerts hourly and do not resume work until wind speed drops below 45 km/h.\n"
-            "- Secure all loose materials, scaffolding panels, and unsecured equipment immediately.\n"
-            "- Issue weather-standdown memo to all contractors; log the stoppage in the site diary."
-        ),
-    },
-    "excavation": {
-        "brief": (
-            "[MOCK] Safety Compliance Assessment: Ambiguous event classified as Excavation category "
-            "(severity 3/10). No regulatory rule triggered for this category at this severity. "
-            "No HARD_STOP issued — operations may continue with standard precautions."
-        ),
-        "advisory_considerations": (
-            "- Verify trench shoring and shielding stability before allowing personnel near excavation faces.\n"
-            "- Conduct atmospheric hazard check (oxygen, CO, methane) at trench entry points.\n"
-            "- Ensure physical barriers and warning tape are installed around all open excavation perimeters."
-        ),
-    },
+def _mock_brief(
+    event_type: str,
+    severity: int,
+    hard_stop: bool,
+    triggered_rules: List[Dict[str, str]],
+) -> str:
+    """
+    Generates a deterministic safety brief by interpolating real computed values
+    (hard_stop, triggered_rules, event_type, severity) into a template.
+    No canned per-scenario text — the template is the single source of truth.
+    """
+    stop_label = "HARD_STOP: TRUE (non-overridable halt)" if hard_stop else "HARD_STOP: FALSE (no halt required)"
+    rules_text = (
+        ", ".join(f"{r['code']}" for r in triggered_rules)
+        if triggered_rules
+        else "none"
+    )
+    rules_detail = (
+        " ".join(f"[{r['code']}: {r['description']}]" for r in triggered_rules)
+        if triggered_rules
+        else "No regulatory rule triggered for this event category."
+    )
+    action = (
+        "All site operations in the affected zone must cease immediately pending inspection and regulatory clearance."
+        if hard_stop
+        else "Operations may continue under standard site precautions. Monitor the situation and escalate if conditions deteriorate."
+    )
+    return (
+        f"[MOCK] ConstructionOS Safety Assessment — Event: {event_type} | Severity: {severity}/10 | {stop_label} | "
+        f"Rules triggered: {rules_text}. {rules_detail} {action}"
+    )
+
+
+# ---------------------------------------------------------------------------
+# Mock advisory template — per event_type, no hard_stop dependency
+# ---------------------------------------------------------------------------
+_MOCK_ADVISORIES: Dict[str, str] = {
+    "work_at_height": (
+        "- Conduct immediate physical inspection of all harnesses, lanyards, and anchor points before any resumption.\n"
+        "- Verify crane hoist mechanism and wire-rope integrity with a certified lifting equipment engineer.\n"
+        "- Issue a site-wide toolbox talk covering fall-clearance calculations and emergency rescue protocol."
+    ),
+    "extreme_weather": (
+        "- Monitor IMD/NDMA alerts hourly and do not resume work until wind speed drops below 45 km/h.\n"
+        "- Secure all loose materials, scaffolding panels, and unsecured equipment immediately.\n"
+        "- Issue weather-standdown memo to all contractors; log the stoppage in the site diary."
+    ),
+    "excavation": (
+        "- Verify trench shoring and shielding stability before allowing personnel near excavation faces.\n"
+        "- Conduct atmospheric hazard check (oxygen, CO, methane) at trench entry points.\n"
+        "- Ensure physical barriers and warning tape are installed around all open excavation perimeters."
+    ),
+    "toxic_gas": (
+        "- Confirm ventilation system is operational and air quality readings are within safe limits before re-entry.\n"
+        "- Ensure all personnel have functioning PPE (respirators, gloves) available on-site.\n"
+        "- Log the incident in the site safety diary and notify the site safety officer immediately."
+    ),
 }
+_DEFAULT_ADVISORY = (
+    "- Follow standard job safety analysis procedures.\n"
+    "- Review contractor safety compliance logs.\n"
+    "- Report any hazardous conditions to site supervisor."
+)
 
 
 def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] = None) -> Dict[str, Any]:
@@ -67,6 +90,8 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
     Evaluates safety compliance by matching the event type against active regulatory rules.
     Issues a HARD_STOP if any matching rule is found.
     In mock mode (USE_MOCK_LLM=true), returns deterministic results with no API calls.
+    Brief is always generated from a template interpolating actual hard_stop/triggered_rules values —
+    never independently-authored canned text — to prevent narrative/decision mismatches structurally.
     """
     # 1. Handle upstream parse errors
     if observe_output.get("parse_error"):
@@ -84,11 +109,11 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
     event_type = observe_output.get("event_type")
     severity = observe_output.get("severity")
 
-    # 2. Load active regulatory knowledge base rules (always deterministic)
+    # 2. Load active regulatory knowledge base rules (always deterministic — never mocked)
     state, fallback_mode = get_project_state()
     rules = state.get("regulatory_kb", [])
 
-    # 3. Match rules based on trigger condition (always deterministic — not mocked)
+    # 3. Match rules based on trigger condition (deterministic — never mocked)
     triggered_rules = []
     for rule in rules:
         if rule.get("trigger_condition") == event_type:
@@ -101,18 +126,16 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
     # WARNING: advisory_considerations must never influence hard_stop.
     hard_stop = len(triggered_rules) > 0
 
-    # --- MOCK MODE: skip all Gemini calls, use canned briefs/advisories ---
+    # --- MOCK MODE: skip all Gemini calls, use templated brief + canned advisories ---
     if use_mock_llm():
         logger.info("[MOCK MODE] Safety Agent running without Gemini API call.")
-        mock_data = _MOCK_SAFETY.get(event_type, {
-            "brief": f"[MOCK] Safety evaluation complete. Hard stop: {hard_stop}. Triggered rules: {', '.join([r['code'] for r in triggered_rules]) if triggered_rules else 'none'}.",
-            "advisory_considerations": "- Follow standard job safety analysis procedures.\n- Report any hazardous conditions to site supervisor.",
-        })
+        brief = _mock_brief(event_type, severity, hard_stop, triggered_rules)
+        advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
         return {
             "hard_stop": hard_stop,
             "triggered_rules": triggered_rules,
-            "brief": mock_data["brief"],
-            "advisory_considerations": mock_data["advisory_considerations"],
+            "brief": brief,
+            "advisory_considerations": advisory_considerations,
             "advisory_disclaimer": _ADVISORY_DISCLAIMER,
             "fallback_mode_active": fallback_mode,
             "parse_error": False
@@ -161,17 +184,7 @@ WARNING: Your narrative must be entirely consistent with the fixed facts above (
     # 5. Generate advisory considerations (best practices relevant to event category)
     advisory_considerations = ""
     if not api_key:
-        # Offline pre-defined fallbacks
-        if event_type == "work_at_height":
-            advisory_considerations = "- Inspect safety harnesses and anchorage points.\n- Verify scaffolding load capacity and guardrails.\n- Conduct a tool-box talk on fall prevention before starting work."
-        elif event_type == "excavation":
-            advisory_considerations = "- Verify shoring/trench shielding stability.\n- Monitor atmospheric hazards and soil water content.\n- Establish clear physical barriers and warning tape around trench perimeters."
-        elif event_type == "toxic_gas":
-            advisory_considerations = "- Check gas detection sensors and calibration logs.\n- Ensure active ventilation is functional.\n- Confirm personal respirators and emergency evacuation gear are ready."
-        elif event_type == "extreme_weather":
-            advisory_considerations = "- Monitor meteorological alerts hourly.\n- Secure loose materials and heavy equipment.\n- Cease high-risk outdoor tasks (like lifts or welding) immediately."
-        else:
-            advisory_considerations = "- Follow standard job safety analysis procedures.\n- Review contractor safety compliance logs.\n- Report any hazardous conditions to site supervisor."
+        advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
     else:
         client = genai.Client(api_key=api_key)
         prompt_advisory = f"""
@@ -188,13 +201,7 @@ Keep the advisory brief, professional, and structured as bullet points (under 80
             advisory_considerations = res_advisory.text.strip()
         except Exception as e:
             logger.error(f"Gemini advisory considerations generation failed: {e}")
-            # Fall back to standard offline template
-            if event_type == "work_at_height":
-                advisory_considerations = "- Inspect safety harnesses and anchorage points.\n- Verify scaffolding load capacity and guardrails."
-            elif event_type == "excavation":
-                advisory_considerations = "- Verify shoring/trench shielding stability.\n- Monitor atmospheric hazards."
-            else:
-                advisory_considerations = "- Follow standard job safety analysis procedures.\n- Report hazardous conditions."
+            advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
 
     return {
         "hard_stop": hard_stop,

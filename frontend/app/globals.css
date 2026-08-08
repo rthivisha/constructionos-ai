@@ -1,9 +1,90 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+@import url("https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;900&display=swap");
+
+@theme {
+  --color-brand-primary: oklch(65% 0.2 250);
+  --color-brand-accent: oklch(72% 0.18 200);
+  --color-surface-base: oklch(12% 0.01 250);
+  --color-surface-card: oklch(16% 0.015 250);
+  --color-surface-elevated: oklch(20% 0.018 250);
+  --color-border-subtle: oklch(28% 0.02 250);
+  --color-text-primary: oklch(96% 0.005 250);
+  --color-text-secondary: oklch(65% 0.01 250);
+  --color-text-muted: oklch(45% 0.01 250);
+  --color-halt-base: oklch(55% 0.22 25);
+  --color-halt-muted: oklch(25% 0.1 25);
+  --color-continue-base: oklch(60% 0.2 160);
+  --color-continue-muted: oklch(22% 0.08 160);
+  --color-warning-base: oklch(72% 0.18 70);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --radius-card: 0.75rem;
+  --shadow-glow-halt: 0 0 40px -12px oklch(55% 0.22 25 / 0.4);
+  --shadow-glow-continue: 0 0 40px -12px oklch(60% 0.2 160 / 0.4);
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html {
+  color-scheme: dark;
+}
 
 body {
-  background-color: #0f172a; /* Slate 900 background for a sleek dark mode base */
-  color: #f8fafc; /* Slate 50 color */
-  font-family: ui-sans-serif, system-ui, sans-serif, "Apple Color Emoji", "Segoe UI Emoji";
+  background-color: var(--color-surface-base);
+  color: var(--color-text-primary);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Glassmorphism card utility */
+.glass-card {
+  background: color-mix(in oklch, var(--color-surface-card) 80%, transparent);
+  backdrop-filter: blur(16px) saturate(180%);
+  border: 1px solid color-mix(in oklch, var(--color-border-subtle) 60%, transparent);
+}
+
+/* Animated gradient border */
+@keyframes border-pulse {
+  0%, 100% { opacity: 0.5; }
+  50% { opacity: 1; }
+}
+
+.border-animated {
+  animation: border-pulse 3s ease-in-out infinite;
+}
+
+/* Severity pulse ring */
+@keyframes severity-ring {
+  0% { box-shadow: 0 0 0 0 oklch(55% 0.22 25 / 0.6); }
+  70% { box-shadow: 0 0 0 8px oklch(55% 0.22 25 / 0); }
+  100% { box-shadow: 0 0 0 0 oklch(55% 0.22 25 / 0); }
+}
+
+.pulse-ring {
+  animation: severity-ring 2s ease-out infinite;
+}
+
+/* Number counter fade-in */
+@keyframes count-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.count-in {
+  animation: count-in 0.4s ease-out forwards;
+}
+
+/* Scroll bar styling */
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-border-subtle);
+  border-radius: 3px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--color-border-subtle) 150%, white);
 }

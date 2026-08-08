@@ -178,7 +178,7 @@ def test_finance_agent_happy_path_fallback(mock_genai):
     observe_output = {
         "event_type": EventType.WORK_AT_HEIGHT.value,
         "task_id": "T-101",
-        "severity": 8,  # severity 8 maps to default delay of 7 days
+        "severity": 8,  # severity 8 maps to default delay of 3 days
         "task_not_matched": False,
         "parse_error": False
     }
@@ -186,9 +186,9 @@ def test_finance_agent_happy_path_fallback(mock_genai):
     res = assess_finance(observe_output, "Some event description with no days mentioned.")
     
     assert res["status"] == "success"
-    assert res["delay_days_used"] == 7
+    assert res["delay_days_used"] == 3
     assert res["delay_source"] == "severity_fallback"
-    assert res["cpm_result"]["project_delay"] == 7
+    assert res["cpm_result"]["project_delay"] == 3
     assert res["cpm_result"]["parse_error"] is False
     assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
 

@@ -1,7 +1,7 @@
 {
   "project_meta": {
-    "name": "Metro Line Extension - Phase 2",
-    "location": "Bengaluru, India",
+    "name": "Metro Rail Line 4",
+    "location": "Mumbai, India",
     "total_budget": 50000000.0,
     "spent_to_date": 12000000.0
   },
@@ -9,40 +9,40 @@
     {
       "name": "L&T Construction",
       "scope": "Structural and civil works",
-      "daily_operating_cost": 150000.0,
-      "daily_delay_penalty": 50000.0,
+      "daily_operating_cost": 85000.0,
+      "daily_delay_penalty": 75000.0,
       "active_workers": 120
     },
     {
-      "name": "Siemens Mobility",
+      "name": "Afcons Infrastructure",
       "scope": "Electrical grid and signaling systems",
       "daily_operating_cost": 120000.0,
-      "daily_delay_penalty": 40000.0,
+      "daily_delay_penalty": 60000.0,
       "active_workers": 45
     },
     {
-      "name": "Tanya Structural",
+      "name": "TATA Projects",
       "scope": "Piping, water supply, and utility relocation",
-      "daily_operating_cost": 60000.0,
-      "daily_delay_penalty": 20000.0,
+      "daily_operating_cost": 30000.0,
+      "daily_delay_penalty": 35000.0,
       "active_workers": 30
     }
   ],
   "divisions": [
     {
-      "id": "DIV-CIVIL",
+      "id": "DIV-A",
       "name": "Civil & Structural",
       "lead_contractor": "L&T Construction"
     },
     {
-      "id": "DIV-ELEC",
+      "id": "DIV-B",
       "name": "Electrical & Signaling",
-      "lead_contractor": "Siemens Mobility"
+      "lead_contractor": "Afcons Infrastructure"
     },
     {
-      "id": "DIV-PIPE",
+      "id": "DIV-C",
       "name": "Piping & Plumbing",
-      "lead_contractor": "Tanya Structural"
+      "lead_contractor": "TATA Projects"
     }
   ],
   "regulatory_kb": [
@@ -69,52 +69,36 @@
   ],
   "schedule_tasks": [
     {
-      "task_id": "T1",
-      "division_id": "DIV-CIVIL",
-      "task_name": "Excavation and Site Preparation",
-      "duration": 15,
+      "task_id": "T-101",
+      "division_id": "DIV-A",
+      "task_name": "Tower Crane Lift",
+      "duration": 10,
       "is_critical_path": 1,
       "dependencies": ""
     },
     {
-      "task_id": "T2",
-      "division_id": "DIV-CIVIL",
-      "task_name": "Foundation Concrete Pouring",
-      "duration": 20,
-      "is_critical_path": 1,
-      "dependencies": "T1"
-    },
-    {
-      "task_id": "T3",
-      "division_id": "DIV-ELEC",
-      "task_name": "Electrical Conduit Laying",
-      "duration": 10,
-      "is_critical_path": 0,
-      "dependencies": "T2"
-    },
-    {
-      "task_id": "T4",
-      "division_id": "DIV-CIVIL",
-      "task_name": "Superstructure Frame Erection",
-      "duration": 25,
-      "is_critical_path": 1,
-      "dependencies": "T2"
-    },
-    {
-      "task_id": "T5",
-      "division_id": "DIV-PIPE",
-      "task_name": "Utility & Piping Connections",
-      "duration": 12,
-      "is_critical_path": 0,
-      "dependencies": "T3"
-    },
-    {
-      "task_id": "T6",
-      "division_id": "DIV-ELEC",
-      "task_name": "Signaling and Testing",
+      "task_id": "T-102",
+      "division_id": "DIV-A",
+      "task_name": "Central Station Foundation Concreting",
       "duration": 15,
       "is_critical_path": 1,
-      "dependencies": "T4,T5"
+      "dependencies": "T-101"
+    },
+    {
+      "task_id": "T-103",
+      "division_id": "DIV-C",
+      "task_name": "South Ramp Drainage Excavation",
+      "duration": 8,
+      "is_critical_path": 1,
+      "dependencies": "T-102"
+    },
+    {
+      "task_id": "T-104",
+      "division_id": "DIV-B",
+      "task_name": "Electrical Conduit Laying",
+      "duration": 5,
+      "is_critical_path": 0,
+      "dependencies": "T-101"
     }
   ]
 }

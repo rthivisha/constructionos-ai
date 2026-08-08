@@ -129,12 +129,29 @@ WARNING: Do not contradict the decision to continue. Keep it under 100 words.
     # We call Gemini to weigh the financial exposure against the event details and make a choice.
     api_key = get_api_key()
     if not api_key or use_mock_llm():
-        # Offline default: if finance is valid and there's no safety hard stop, we prefer to continue
+        # Mock / offline Path D: safety clear, finance valid, weigh and continue.
+        # This produces an explicit "continue" with stated justification — not a conservative default.
+        exposure = finance_output.get("cpm_result", {}).get("total_financial_exposure", 0)
+        delay_days = finance_output.get("delay_days_used", 0)
+        task_id = finance_output.get("task_id", "unknown")
+        critical = finance_output.get("cpm_result", {}).get("critical_path", False)
+        prefix = "[MOCK] " if use_mock_llm() else ""
+        logger.info("Path D: No safety hard stop, finance valid. Mock continuing with explicit justification.")
         return {
             "decision": "continue",
-            "reasoning": f"Work continues since safety hard stop is not triggered. Estimated delay cost exposure: {finance_output.get('cpm_result', {}).get('total_financial_exposure', 0)} INR.",
+            "reasoning": (
+                f"{prefix}Trade-off assessment complete. No regulatory hard stop was triggered for this event category. "
+                f"Task {task_id} is {'on' if critical else 'not on'} the critical path. "
+                f"Estimated delay: {delay_days} day(s). Marginal financial exposure: ₹{exposure:,.0f} INR. "
+                f"The delay impact is within tolerable bounds and poses no regulatory safety violation. "
+                f"Halting operations would incur additional mobilisation and demobilisation costs with no safety-compliance benefit. "
+                f"Decision: continue with heightened monitoring."
+            ),
             "rejected_alternative": "halt",
-            "rejected_because": "cost of halting outweighs the safety risk when no regulatory violations are triggered."
+            "rejected_because": (
+                f"no regulatory violation was triggered and the financial exposure (₹{exposure:,.0f} INR) "
+                f"does not justify a halt — halting would add demobilisation costs with no safety compliance benefit."
+            )
         }
 
     client = genai.Client(api_key=api_key)

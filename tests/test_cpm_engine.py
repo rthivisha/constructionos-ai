@@ -31,31 +31,29 @@ def setup_test_db():
         except PermissionError:
             pass
 
-
-
 def test_get_task_impact_database_mode():
-    # T1: "Excavation and Site Preparation"
-    # Division: DIV-CIVIL -> L&T Construction
-    # Daily Operating Cost: 150000, Delay Penalty: 50000, Critical Path: 1
-    impact = get_task_impact("Excavation and Site Preparation")
+    # T-101: "Tower Crane Lift"
+    # Division: DIV-A -> L&T Construction
+    # Daily Operating Cost: 85000, Delay Penalty: 75000, Critical Path: 1
+    impact = get_task_impact("Tower Crane Lift")
     
     assert impact["assigned_crew"] == "L&T Construction"
-    assert impact["daily_operating_cost"] == 150000.0
-    assert impact["contractor_penalty_rate"] == 50000.0
+    assert impact["daily_operating_cost"] == 85000.0
+    assert impact["contractor_penalty_rate"] == 75000.0
     assert impact["critical_path"] is True
     assert impact["fallback_mode_active"] is False
 
-    # T3: "Electrical Conduit Laying"
-    # Division: DIV-ELEC -> Siemens Mobility
-    # Daily Operating Cost: 120000, Delay Penalty: 40000, Critical Path: 0
-    impact_t3 = get_task_impact("Electrical Conduit Laying")
-    assert impact_t3["assigned_crew"] == "Siemens Mobility"
-    assert impact_t3["daily_operating_cost"] == 120000.0
-    assert impact_t3["contractor_penalty_rate"] == 40000.0
-    assert impact_t3["critical_path"] is False
+    # T-104: "Electrical Conduit Laying"
+    # Division: DIV-B -> Afcons Infrastructure
+    # Daily Operating Cost: 120000, Delay Penalty: 60000, Critical Path: 0
+    impact_t104 = get_task_impact("Electrical Conduit Laying")
+    assert impact_t104["assigned_crew"] == "Afcons Infrastructure"
+    assert impact_t104["daily_operating_cost"] == 120000.0
+    assert impact_t104["contractor_penalty_rate"] == 60000.0
+    assert impact_t104["critical_path"] is False
 
     # Check case-insensitivity
-    impact_case = get_task_impact("  excavation and site preparation  ")
+    impact_case = get_task_impact("  tower crane lift  ")
     assert impact_case["assigned_crew"] == "L&T Construction"
 
     # Invalid task raises ValueError
@@ -63,15 +61,15 @@ def test_get_task_impact_database_mode():
         get_task_impact("Non-existent task name")
 
 def test_recalculate_schedule_critical_delay():
-    # Delay T1 (Excavation) by 5 days.
-    # T1 is critical, baseline project duration is 75 days (T1=15, T2=20, T4=25, T6=15)
-    # T1 delayed by 5 days -> new project duration should be 80 days (project delay = 5 days)
-    res = recalculate_schedule("T1", 5)
+    # Delay T-101 (Tower Crane Lift) by 5 days.
+    # T-101 is critical, baseline project duration is 33 days (T-101=10, T-102=15, T-103=8)
+    # T-101 delayed by 5 days -> new project duration should be 38 days (project delay = 5 days)
+    res = recalculate_schedule("T-101", 5)
     
-    assert res["halted_task_id"] == "T1"
+    assert res["halted_task_id"] == "T-101"
     assert res["delay_days"] == 5
-    assert res["baseline_project_duration"] == 75
-    assert res["new_project_duration"] == 80
+    assert res["baseline_project_duration"] == 33
+    assert res["new_project_duration"] == 38
     assert res["project_delay"] == 5
     assert res["fallback_mode_active"] is False
 
@@ -79,22 +77,19 @@ def test_recalculate_schedule_critical_delay():
     breakdown = res["breakdown"]
     
     # Check shifted tasks
-    # Delaying T1 shifts T1, T2, T3, T4, T5, T6 (virtually every task shifts since T1 is the root)
+    # Delaying T-101 shifts T-101, T-102, T-103, T-104 (all tasks shift since T-101 is the root)
     shifted_ids = {t["task_id"] for t in breakdown["shifted_tasks"]}
-    assert "T1" in shifted_ids
-    assert "T2" in shifted_ids
-    assert "T6" in shifted_ids
+    assert "T-101" in shifted_ids
+    assert "T-102" in shifted_ids
+    assert "T-103" in shifted_ids
+    assert "T-104" in shifted_ids
 
     # Check penalized tasks
-    # T1 finish shifts 15 -> 20 (exceeds original 15) -> Penalized
-    # T2 finish shifts 35 -> 40 (exceeds original 35) -> Penalized
-    # T4 finish shifts 60 -> 65 (exceeds original 60) -> Penalized
-    # T6 finish shifts 75 -> 80 (exceeds original 75) -> Penalized
     penalized_ids = {t["task_id"] for t in breakdown["penalized_tasks"]}
-    assert "T1" in penalized_ids
-    assert "T2" in penalized_ids
-    assert "T4" in penalized_ids
-    assert "T6" in penalized_ids
+    assert "T-101" in penalized_ids
+    assert "T-102" in penalized_ids
+    assert "T-103" in penalized_ids
+    assert "T-104" in penalized_ids
 
     # Verify mathematical correctness of the exposure
     # Sum of operating cost of shifted tasks * delay_days
@@ -110,55 +105,45 @@ def test_recalculate_schedule_critical_delay():
     assert res["total_financial_exposure"] == expected_operating_exposure + expected_penalty_exposure
 
 def test_recalculate_schedule_non_critical_delay():
-    # Delay T3 (Electrical Conduit Laying) by 5 days.
-    # T3 (duration 10, starts at 35, ends 45, slack 3).
-    # Delaying T3 by 5 days: duration becomes 15.
-    # Early finish of T3 becomes 50 (originally 45).
-    # T5 depends on T3, start shifts 45 -> 50, duration 12, finish shifts 57 -> 62 (exceeds original 57 by 5 days).
-    # T6 depends on T4 (ends 60) and T5 (ends 62). So T6 starts at 62 (originally 60), finish shifts 75 -> 77.
-    # Project delay = 77 - 75 = 2 days.
-    # Shifted tasks should be: T3, T5, T6 (since their dates changed). T1, T2, T4 are unchanged.
-    res = recalculate_schedule("T3", 5)
+    # Delay T-104 (Electrical Conduit Laying) by 5 days.
+    # T-104 (duration 5, starts at 10, ends 15, slack 18).
+    # Delaying T-104 by 5 days: duration becomes 10.
+    # Early finish of T-104 becomes 20 (originally 15).
+    # This is less than baseline project duration (33), so project delay is 0.
+    # Shifted tasks should be: T-104 (its dates changed).
+    res = recalculate_schedule("T-104", 5)
 
-    assert res["baseline_project_duration"] == 75
-    assert res["new_project_duration"] == 77
-    assert res["project_delay"] == 2
+    assert res["baseline_project_duration"] == 33
+    assert res["new_project_duration"] == 33
+    assert res["project_delay"] == 0
 
     breakdown = res["breakdown"]
     shifted_ids = {t["task_id"] for t in breakdown["shifted_tasks"]}
-    assert shifted_ids == {"T3", "T5", "T6"}
+    assert shifted_ids == {"T-104"}
 
     # Penalized tasks: new finish > baseline finish
-    # T3: baseline finish 45, new finish 50 (exceeds by 5)
-    # T5: baseline finish 57, new finish 62 (exceeds by 5)
-    # T6: baseline finish 75, new finish 77 (exceeds by 2)
+    # T-104: baseline finish 15, new finish 20 (exceeds by 5)
     penalized_tasks = {t["task_id"]: t for t in breakdown["penalized_tasks"]}
-    assert set(penalized_tasks.keys()) == {"T3", "T5", "T6"}
+    assert set(penalized_tasks.keys()) == {"T-104"}
     
-    assert penalized_tasks["T3"]["delay_days"] == 5
-    assert penalized_tasks["T5"]["delay_days"] == 5
-    assert penalized_tasks["T6"]["delay_days"] == 2
+    assert penalized_tasks["T-104"]["delay_days"] == 5
 
     # Verify costs
     sum_operating_cost = sum(t["daily_operating_cost"] for t in breakdown["shifted_tasks"])
     assert breakdown["operating_cost_exposure"] == 5 * sum_operating_cost
     
-    expected_penalty_exposure = (
-        5 * penalized_tasks["T3"]["daily_delay_penalty"] +
-        5 * penalized_tasks["T5"]["daily_delay_penalty"] +
-        2 * penalized_tasks["T6"]["daily_delay_penalty"]
-    )
+    expected_penalty_exposure = 5 * penalized_tasks["T-104"]["daily_delay_penalty"]
     assert breakdown["penalty_exposure"] == expected_penalty_exposure
     assert res["total_financial_exposure"] == (5 * sum_operating_cost) + expected_penalty_exposure
 
 def test_recalculate_schedule_zero_delay():
-    res = recalculate_schedule("T1", 0)
+    res = recalculate_schedule("T-101", 0)
     assert res["project_delay"] == 0
     assert res["total_financial_exposure"] == 0.0
 
 def test_recalculate_schedule_invalid_parameters():
     with pytest.raises(ValueError):
-        recalculate_schedule("T1", -5)
+        recalculate_schedule("T-101", -5)
     with pytest.raises(ValueError):
         recalculate_schedule("NON_EXISTENT", 5)
 
@@ -167,16 +152,14 @@ def test_fallback_mode_triggered():
     backend.db.DB_PATH = "this_file_definitely_does_not_exist.db"
     
     # Trigger get_task_impact and recalculate_schedule, verify fallback is true
-    # and they still complete successfully using seed_project_state.json
     try:
-        impact = get_task_impact("Excavation and Site Preparation")
+        impact = get_task_impact("Tower Crane Lift")
         assert impact["fallback_mode_active"] is True
         assert impact["assigned_crew"] == "L&T Construction"
         
-        res = recalculate_schedule("T1", 5)
+        res = recalculate_schedule("T-101", 5)
         assert res["fallback_mode_active"] is True
         assert res["project_delay"] == 5
     finally:
         # Restore DB path
         backend.db.DB_PATH = TEST_DB_PATH
-

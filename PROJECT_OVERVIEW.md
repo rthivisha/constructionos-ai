@@ -54,7 +54,16 @@ code changes must not quietly weaken this.
 - **HARD_STOP** — Safety Agent's non-overridable halt signal.
 - **Trade-off Agent** — reconciles Safety and Finance outputs into one decision.
 - **Critical path** — task sequence where a delay directly delays the whole project.
-- **[Add Division A/B, CPM, or other project-specific terms once defined]**
+- **Schedule Task Schema**: The live project database seeds tasks using the Metro Rail Line 4 schema:
+  * **T-101**: Tower Crane Lift (Division: `DIV-A`, Contractor: `L&T Construction`)
+  * **T-102**: Central Station Foundation Concreting (Division: `DIV-A`, Contractor: `L&T Construction`, depends on `T-101`)
+  * **T-103**: South Ramp Drainage Excavation (Division: `DIV-C`, Contractor: `TATA Projects`, depends on `T-102`)
+  * **T-104**: Electrical Conduit Laying (Division: `DIV-B`, Contractor: `Afcons Infrastructure`, depends on `T-101`, non-critical task added for schedule delay verification)
+- **Contractor SLAs**:
+  * **L&T Construction**: Daily Operating Cost ₹85,000, Daily Delay Penalty ₹75,000
+  * **Afcons Infrastructure**: Daily Operating Cost ₹120,000, Daily Delay Penalty ₹60,000
+  * **TATA Projects**: Daily Operating Cost ₹30,000, Daily Delay Penalty ₹35,000
+
 
 # #workflow: 
 **ConstructionOS AI** is an autonomous site operations engine that coordinates specialized AI agents to detect, analyze, and resolve job-site disruptions in real time.
@@ -74,4 +83,4 @@ code changes must not quietly weaken this.
 ### Primary Impact
  * **Zero-Downtime Operations:** Keeps labor and machinery active by resolving bottlenecks before they cause idle time.
  * **Proactive Risk Mitigation:** Identifies safety hazards early to prevent accidents and compliance violations.
- * **Cost & Timeline Control:** Reallocates resources automatically to protect project margins and delivery dates.
+ * **Cost & Timeline Control:** Reallocates resources automatically to protect project margins and delivery dates.

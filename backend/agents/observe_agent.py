@@ -54,17 +54,22 @@ def get_api_key() -> str:
 
 
 # ---------------------------------------------------------------------------
-# MOCK LLM responses for demo scenarios
+# MOCK LLM responses for demo scenarios (USE_MOCK_LLM=true)
 # ---------------------------------------------------------------------------
 def _mock_observe(event_text: str) -> Dict[str, Any]:
     """
     Deterministic mock for the Observe Agent.
-    Pattern-matched against the three approved demo scenarios.
+    Pattern-matched against the four approved demo scenarios.
     Zero Gemini API calls.
+
+    Scenario 1 — Crane Failure (T-101):   work_at_height, severity 8
+    Scenario 2 — Heavy Weather (T-103):   extreme_weather, severity 6
+    Scenario 3 — Ambiguous Input:         excavation, task_not_matched=True, severity 3
+    Scenario 4 — Minor Material Delay (T-104): toxic_gas category (no KB rule), severity 2, non-critical task
     """
     text = event_text.lower()
 
-    # Scenario 1: Tower Crane Lift Failure (T-101)
+    # Scenario 1: Tower Crane Lift Failure (T-101) — work_at_height, critical
     if "crane" in text or "hoist" in text or "tower crane" in text or "mechanical failure" in text:
         logger.info("[MOCK] Observe Agent → crane failure scenario (T-101)")
         return {
@@ -75,7 +80,7 @@ def _mock_observe(event_text: str) -> Dict[str, Any]:
             "parse_error": False
         }
 
-    # Scenario 2: Heavy weather / extreme weather
+    # Scenario 2: Heavy Weather (T-103) — extreme_weather, critical
     if any(w in text for w in ["weather", "rain", "wind", "storm", "monsoon", "flood", "cyclone", "heat"]):
         logger.info("[MOCK] Observe Agent → heavy weather scenario (T-103)")
         return {
@@ -86,7 +91,19 @@ def _mock_observe(event_text: str) -> Dict[str, Any]:
             "parse_error": False
         }
 
-    # Scenario 3: Intentionally ambiguous input (no clear match)
+    # Scenario 4: Minor Material Delay (T-104) — toxic_gas category (no KB rule), non-critical
+    # Matched before ambiguous so specific keywords win
+    if any(w in text for w in ["conduit", "electrical", "material", "delivery", "ventilation", "minor", "supply"]):
+        logger.info("[MOCK] Observe Agent → minor material delay scenario (T-104, no KB rule)")
+        return {
+            "event_type": "toxic_gas",
+            "task_id": "T-104",
+            "severity": 2,
+            "task_not_matched": False,
+            "parse_error": False
+        }
+
+    # Scenario 3: Intentionally Ambiguous Input — excavation, no task match
     logger.info("[MOCK] Observe Agent → ambiguous input scenario (no task match)")
     return {
         "event_type": "excavation",

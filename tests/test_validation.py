@@ -34,11 +34,12 @@ def setup_test_db():
             pass
 
 def test_get_project_setup_happy_path():
+    # Metro Rail Line 4 is the new seeded project name
     response = client.get("/api/project-setup")
     assert response.status_code == 200
     data = response.json()
     assert "project_meta" in data
-    assert data["project_meta"]["name"] == "Metro Line Extension - Phase 2"
+    assert data["project_meta"]["name"] == "Metro Rail Line 4"
     assert len(data["contractors"]) > 0
 
 def test_update_project_meta_happy_path():
@@ -89,7 +90,7 @@ def test_missing_task_dependency_blocked():
     bad_tasks = [
         {
             "task_id": "T100",
-            "division_id": "DIV-CIVIL",
+            "division_id": "DIV-A",
             "task_name": "Test Task 1",
             "duration": 5,
             "is_critical_path": 1,
@@ -105,7 +106,7 @@ def test_dependency_cycle_blocked():
     cyclic_tasks = [
         {
             "task_id": "T100",
-            "division_id": "DIV-CIVIL",
+            "division_id": "DIV-A",
             "task_name": "Test Task 1",
             "duration": 5,
             "is_critical_path": 1,
@@ -113,7 +114,7 @@ def test_dependency_cycle_blocked():
         },
         {
             "task_id": "T200",
-            "division_id": "DIV-CIVIL",
+            "division_id": "DIV-A",
             "task_name": "Test Task 2",
             "duration": 10,
             "is_critical_path": 1,
@@ -130,7 +131,7 @@ def test_symmetric_delete_blocks():
     setup_data = client.get("/api/project-setup").json()
     initial_contractors = setup_data["contractors"]
     
-    # Exclude "L&T Construction" (which is used by DIV-CIVIL)
+    # Exclude "L&T Construction" (which is used by DIV-A)
     filtered_contractors = [c for c in initial_contractors if c["name"] != "L&T Construction"]
     
     response = client.put("/api/project-setup/contractors", json=filtered_contractors)
@@ -139,8 +140,8 @@ def test_symmetric_delete_blocks():
 
     # Verify trying to delete a division currently referenced by active tasks fails
     initial_divisions = setup_data["divisions"]
-    # Exclude "DIV-CIVIL" (referenced by task T1 and T2)
-    filtered_divisions = [d for d in initial_divisions if d["id"] != "DIV-CIVIL"]
+    # Exclude "DIV-A" (referenced by task T-101 and T-102)
+    filtered_divisions = [d for d in initial_divisions if d["id"] != "DIV-A"]
     
     div_response = client.put("/api/project-setup/divisions", json=filtered_divisions)
     assert div_response.status_code == 400
