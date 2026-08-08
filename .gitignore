@@ -1,0 +1,24 @@
+# Node.js dependencies
+node_modules/
+.next/
+out/
+build/
+
+# Python dependencies and environments
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.env
+.venv
+env/
+venv/
+ENV/
+
+# Databases
+*.db
+*.sqlite3
+
+# OS metadata
+.DS_Store
+Thumbs.db

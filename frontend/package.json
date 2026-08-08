@@ -1,0 +1,6 @@
+{
+  "name": "constructionos-frontend",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Frontend package configuration for the Next.js ConstructionOS dashboard."
+}
