@@ -295,3 +295,35 @@ def test_agents_independence(mock_get_state, mock_genai):
         # Verify that the Finance Agent result does not contain Safety keys like hard_stop or triggered_rules
         assert "hard_stop" not in res_finance
         assert "triggered_rules" not in res_finance
+
+def test_safety_agent_advisory_isolation():
+    # Verify that even when advisory considerations are generated, they do not influence hard_stop.
+    # Case 1: Active Safety event (e.g. work_at_height) that matches regulatory rules in DB -> hard_stop should be True
+    observe_output_match = {
+        "event_type": "work_at_height",
+        "task_id": "T-101",
+        "severity": 8,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    # Using offline fallback (mocking API key empty)
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res_match = assess_safety(observe_output_match, "Worker at height report.")
+        assert res_match["hard_stop"] is True
+        assert "harness" in res_match["advisory_considerations"].lower()
+        assert "derived deterministically" in res_match["advisory_disclaimer"]
+
+    # Case 2: Active Safety event (e.g. excavation) with NO rules matching in DB (as we seeded none for excavation) -> hard_stop should be False
+    observe_output_no_match = {
+        "event_type": "excavation",
+        "task_id": "T-101",
+        "severity": 8,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res_no_match = assess_safety(observe_output_no_match, "Excavation digging report.")
+        assert res_no_match["hard_stop"] is False
+        assert "shoring" in res_no_match["advisory_considerations"].lower()
+        assert "derived deterministically" in res_no_match["advisory_disclaimer"]
+

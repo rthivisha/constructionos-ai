@@ -13,6 +13,8 @@ interface ReasoningTraceProps {
       hard_stop: boolean;
       triggered_rules: { code: string; description: string }[];
       brief: string;
+      advisory_considerations?: string;
+      advisory_disclaimer?: string;
       fallback_mode_active: boolean;
       parse_error: boolean;
       status?: string;
@@ -154,6 +156,22 @@ export default function ReasoningTrace({ data }: ReasoningTraceProps) {
               {safety_assessment.brief}
             </p>
           </div>
+
+          {safety_assessment.advisory_considerations && (
+            <div className="border-t border-slate-850 pt-3.5 space-y-1">
+              <span className="text-xs font-semibold text-amber-500 uppercase tracking-wider block">
+                AI Advisory considerations
+              </span>
+              <div className="rounded bg-slate-950/30 border border-slate-850 p-2.5 text-xs text-slate-300 whitespace-pre-line leading-relaxed">
+                {safety_assessment.advisory_considerations}
+              </div>
+              {safety_assessment.advisory_disclaimer && (
+                <span className="text-[10px] text-slate-500 italic leading-normal block">
+                  {safety_assessment.advisory_disclaimer}
+                </span>
+              )}
+            </div>
+          )}
         </div>
       </div>
 

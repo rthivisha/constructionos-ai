@@ -246,9 +246,10 @@ def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class):
     # Configure mock responses for all Gemini calls in order:
     # 1. Observe Agent
     # 2. Safety Agent Compliance Brief
-    # 3. Finance Agent Delay Extraction
-    # 4. Finance Agent Financial Brief
-    # 5. Trade-off Agent Reconciliation Decision
+    # 3. Safety Agent Advisory Considerations
+    # 4. Finance Agent Delay Extraction
+    # 5. Finance Agent Financial Brief
+    # 6. Trade-off Agent Reconciliation Decision
     mock_client.models.generate_content.side_effect = [
         MockResponse(json.dumps({
             "event_type": "excavation",
@@ -256,6 +257,7 @@ def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class):
             "severity": 4
         })),
         MockResponse("Compliance looks fine, caution advised."),
+        MockResponse("- Verify shoring stability.\n- Monitor trench atmospheric hazards."),
         MockResponse(json.dumps({
             "delay_days": 3
         })),
@@ -267,6 +269,7 @@ def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class):
             "rejected_because": "cost of halting is higher than continuing."
         }))
     ]
+
     
     response = client.post("/api/events", json={"event_text": "Minor soil unstable at drainage excavation."})
     assert response.status_code == 200
