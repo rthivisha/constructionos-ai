@@ -81,4 +81,16 @@ export const api = {
     });
     return handleResponse(res);
   },
+
+  async processSiteEvent(eventText: string) {
+    const res = await fetch(`${API_BASE_URL}/api/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ event_text: eventText }),
+    });
+    return handleResponse(res);
+  },
 };
+
