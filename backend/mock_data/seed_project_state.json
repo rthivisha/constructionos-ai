@@ -1,3 +1,120 @@
 {
-  "_comment": "Initial project state values for database seeding, loaded once at startup."
+  "project_meta": {
+    "name": "Metro Line Extension - Phase 2",
+    "location": "Bengaluru, India",
+    "total_budget": 50000000.0,
+    "spent_to_date": 12000000.0
+  },
+  "contractors": [
+    {
+      "name": "L&T Construction",
+      "scope": "Structural and civil works",
+      "daily_operating_cost": 150000.0,
+      "daily_delay_penalty": 50000.0,
+      "active_workers": 120
+    },
+    {
+      "name": "Siemens Mobility",
+      "scope": "Electrical grid and signaling systems",
+      "daily_operating_cost": 120000.0,
+      "daily_delay_penalty": 40000.0,
+      "active_workers": 45
+    },
+    {
+      "name": "Tanya Structural",
+      "scope": "Piping, water supply, and utility relocation",
+      "daily_operating_cost": 60000.0,
+      "daily_delay_penalty": 20000.0,
+      "active_workers": 30
+    }
+  ],
+  "divisions": [
+    {
+      "id": "DIV-CIVIL",
+      "name": "Civil & Structural",
+      "lead_contractor": "L&T Construction"
+    },
+    {
+      "id": "DIV-ELEC",
+      "name": "Electrical & Signaling",
+      "lead_contractor": "Siemens Mobility"
+    },
+    {
+      "id": "DIV-PIPE",
+      "name": "Piping & Plumbing",
+      "lead_contractor": "Tanya Structural"
+    }
+  ],
+  "regulatory_kb": [
+    {
+      "code": "BOCW_SEC_40",
+      "description": "BOCW Act Section 40: Work at height (>2m) requires mandatory safety scaffolding and harness check.",
+      "trigger_condition": "work_at_height"
+    },
+    {
+      "code": "BOCW_SEC_46",
+      "description": "BOCW Act Section 46: Excavation depth >1.5m requires side shoring and safety ladders.",
+      "trigger_condition": "excavation"
+    },
+    {
+      "code": "FA_SEC_87",
+      "description": "Factories Act Section 87: Exposure to toxic gases or chemical handling requires PPE and continuous ventilation.",
+      "trigger_condition": "toxic_gas"
+    },
+    {
+      "code": "LABOUR_TEMPV",
+      "description": "Labour Dept Norms: Wet weather / high heat index (>40C) requires mandatory rest periods.",
+      "trigger_condition": "extreme_weather"
+    }
+  ],
+  "schedule_tasks": [
+    {
+      "task_id": "T1",
+      "division_id": "DIV-CIVIL",
+      "task_name": "Excavation and Site Preparation",
+      "duration": 15,
+      "is_critical_path": 1,
+      "dependencies": ""
+    },
+    {
+      "task_id": "T2",
+      "division_id": "DIV-CIVIL",
+      "task_name": "Foundation Concrete Pouring",
+      "duration": 20,
+      "is_critical_path": 1,
+      "dependencies": "T1"
+    },
+    {
+      "task_id": "T3",
+      "division_id": "DIV-ELEC",
+      "task_name": "Electrical Conduit Laying",
+      "duration": 10,
+      "is_critical_path": 0,
+      "dependencies": "T2"
+    },
+    {
+      "task_id": "T4",
+      "division_id": "DIV-CIVIL",
+      "task_name": "Superstructure Frame Erection",
+      "duration": 25,
+      "is_critical_path": 1,
+      "dependencies": "T2"
+    },
+    {
+      "task_id": "T5",
+      "division_id": "DIV-PIPE",
+      "task_name": "Utility & Piping Connections",
+      "duration": 12,
+      "is_critical_path": 0,
+      "dependencies": "T3"
+    },
+    {
+      "task_id": "T6",
+      "division_id": "DIV-ELEC",
+      "task_name": "Signaling and Testing",
+      "duration": 15,
+      "is_critical_path": 1,
+      "dependencies": "T4,T5"
+    }
+  ]
 }
