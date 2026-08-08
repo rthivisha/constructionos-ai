@@ -67,12 +67,18 @@ def get_project_state() -> Tuple[Dict[str, Any], bool]:
             cursor.execute("SELECT name, scope, daily_operating_cost, daily_delay_penalty, active_workers FROM contractors;")
             contractors = [dict(row) for row in cursor.fetchall()]
             
+            # Fetch regulatory rules
+            cursor.execute("SELECT code, description, trigger_condition FROM regulatory_kb;")
+            regulatory_kb = [dict(row) for row in cursor.fetchall()]
+            
             conn.close()
             return {
                 "schedule_tasks": tasks,
                 "divisions": divisions,
-                "contractors": contractors
+                "contractors": contractors,
+                "regulatory_kb": regulatory_kb
             }, False
+
         except Exception as e:
             logger.warning(f"Error querying SQLite database: {e}. Falling back to JSON.")
             db_ok = False
