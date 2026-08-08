@@ -10,14 +10,12 @@ test_db_file.close()
 
 import backend.db
 
-# Override the DB path in db module
-backend.db.DB_PATH = TEST_DB_PATH
-
 from backend.db import init_db
 from backend.tools.cpm_engine import get_task_impact, recalculate_schedule, get_project_state
 
 @pytest.fixture(autouse=True)
 def setup_test_db():
+    backend.db.DB_PATH = TEST_DB_PATH
     # Fresh database initialization before each test
     if os.path.exists(TEST_DB_PATH):
         try:
@@ -32,6 +30,7 @@ def setup_test_db():
             os.remove(TEST_DB_PATH)
         except PermissionError:
             pass
+
 
 
 def test_get_task_impact_database_mode():
