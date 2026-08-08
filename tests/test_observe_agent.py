@@ -121,6 +121,7 @@ def test_observe_event_crane_failure_success(mock_genai_client_class):
     assert result["task_id"] == "T-101"
     assert result["severity"] == 8
     assert result["task_not_matched"] is False
+    assert result["parse_error"] is False
 
 @patch('backend.agents.observe_agent.genai.Client')
 def test_observe_event_ambiguous_input(mock_genai_client_class):
@@ -144,6 +145,7 @@ def test_observe_event_ambiguous_input(mock_genai_client_class):
     assert result["task_id"] is None
     assert result["severity"] == 5
     assert result["task_not_matched"] is True
+    assert result["parse_error"] is False
 
 @patch('backend.agents.observe_agent.genai.Client')
 def test_observe_event_invalid_task_id_from_gemini(mock_genai_client_class):
@@ -166,6 +168,7 @@ def test_observe_event_invalid_task_id_from_gemini(mock_genai_client_class):
     assert result["event_type"] == EventType.EXCAVATION.value
     assert result["task_id"] is None
     assert result["task_not_matched"] is True
+    assert result["parse_error"] is False
 
 @patch('backend.agents.observe_agent.genai.Client')
 def test_observe_event_malformed_or_invalid_gemini_response(mock_genai_client_class):
@@ -175,10 +178,11 @@ def test_observe_event_malformed_or_invalid_gemini_response(mock_genai_client_cl
     # 1. Test malformed JSON syntax response
     mock_client.models.generate_content.return_value = MockResponse("{malformed-json")
     result_malformed = observe_event("Raw event text report.")
-    assert result_malformed["event_type"] == EventType.EXCAVATION.value
+    assert result_malformed["event_type"] is None
     assert result_malformed["task_id"] is None
-    assert result_malformed["severity"] == 1
+    assert result_malformed["severity"] is None
     assert result_malformed["task_not_matched"] is True
+    assert result_malformed["parse_error"] is True
 
     # 2. Test schema-invalid JSON response (e.g. invalid event_type, out-of-bounds severity)
     mock_client.models.generate_content.return_value = MockResponse(
@@ -189,8 +193,10 @@ def test_observe_event_malformed_or_invalid_gemini_response(mock_genai_client_cl
         })
     )
     result_invalid = observe_event("Raw event text report.")
-    assert result_invalid["event_type"] == EventType.EXCAVATION.value
+    assert result_invalid["event_type"] is None
     assert result_invalid["task_id"] is None
-    assert result_invalid["severity"] == 1
+    assert result_invalid["severity"] is None
     assert result_invalid["task_not_matched"] is True
+    assert result_invalid["parse_error"] is True
+
 

@@ -110,12 +110,13 @@ Raw event description:
         
     except Exception as e:
         logger.error(f"Gemini API invocation or parsing failed: {e}")
-        # Return a safe fallback default if generation fails
+        # Return distinct error fallback state
         return {
-            "event_type": EventType.EXCAVATION.value,
+            "event_type": None,
             "task_id": None,
-            "severity": 1,
-            "task_not_matched": True
+            "severity": None,
+            "task_not_matched": True,
+            "parse_error": True
         }
 
     # Validate matched_task_id against database tasks list
@@ -133,5 +134,7 @@ Raw event description:
         "event_type": parsed_data.event_type.value,
         "task_id": task_id,
         "severity": parsed_data.severity,
-        "task_not_matched": task_not_matched
+        "task_not_matched": task_not_matched,
+        "parse_error": False
     }
+
