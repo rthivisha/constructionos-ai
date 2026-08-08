@@ -5,6 +5,7 @@ from google import genai
 
 from backend.agents.observe_agent import get_api_key
 from backend.tools.cpm_engine import get_project_state
+from backend.config import MODEL_NAME
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -76,7 +77,7 @@ WARNING: Your narrative must be entirely consistent with the fixed facts above (
 """
         try:
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model=MODEL_NAME,
                 contents=prompt
             )
             brief = response.text.strip()
@@ -111,7 +112,7 @@ Keep the advisory brief, professional, and structured as bullet points (under 80
 """
         try:
             res_advisory = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model=MODEL_NAME,
                 contents=prompt_advisory
             )
             advisory_considerations = res_advisory.text.strip()

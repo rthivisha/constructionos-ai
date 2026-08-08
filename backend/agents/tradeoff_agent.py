@@ -6,6 +6,7 @@ from google import genai
 from google.genai import types
 
 from backend.agents.observe_agent import get_api_key
+from backend.config import MODEL_NAME
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -79,7 +80,7 @@ Write a narrative reasoning explaining the halt. Highlight the importance of reg
 WARNING: Do not contradict the decision to halt. Keep it under 100 words.
 """
             try:
-                response = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
+                response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
                 default_reasoning = response.text.strip()
             except Exception as e:
                 logger.error(f"Gemini tradeoff reasoning failed: {e}")
@@ -112,7 +113,7 @@ Explain that the decision was made on safety information alone because financial
 WARNING: Do not contradict the decision to continue. Keep it under 100 words.
 """
             try:
-                response = client.models.generate_content(model='gemini-2.0-flash', contents=prompt)
+                response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
                 default_reasoning = response.text.strip()
             except Exception as e:
                 logger.error(f"Gemini tradeoff reasoning failed: {e}")
@@ -166,7 +167,7 @@ Your decision and reasoning must follow the schema strictly.
 """
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model=MODEL_NAME,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",

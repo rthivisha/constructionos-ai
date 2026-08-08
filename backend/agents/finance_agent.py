@@ -8,22 +8,24 @@ from google.genai import types
 
 from backend.agents.observe_agent import get_api_key
 from backend.tools.cpm_engine import get_project_state, get_task_impact, recalculate_schedule
+from backend.config import MODEL_NAME
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 # Severity to Default Delay Days mapping (documented ranges)
+# 1-3: 1 day, 4-6: 2 days, 7-8: 3 days, 9-10: 4 days
 SEVERITY_TO_DEFAULT_DELAY_DAYS = {
     1: 1,
     2: 1,
-    3: 2,
+    3: 1,
     4: 2,
-    5: 3,
-    6: 4,
-    7: 5,
-    8: 7,
-    9: 10,
-    10: 14
+    5: 2,
+    6: 2,
+    7: 3,
+    8: 3,
+    9: 4,
+    10: 4
 }
 
 # Pydantic schema for extracting delay from raw text
@@ -137,7 +139,7 @@ If no delay duration is explicitly mentioned in the text, return null.
 """
         try:
             response = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model=MODEL_NAME,
                 contents=prompt_extraction,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
@@ -209,7 +211,7 @@ Please write a brief summary explaining these financial impacts. Your narrative 
 """
         try:
             res = client.models.generate_content(
-                model='gemini-2.0-flash',
+                model=MODEL_NAME,
                 contents=prompt_brief
             )
             brief = res.text.strip()

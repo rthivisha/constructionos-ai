@@ -8,6 +8,7 @@ from google.genai import types
 
 from backend.agents.event_types import EventType
 from backend.tools.cpm_engine import get_project_state
+from backend.config import MODEL_NAME
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -94,7 +95,7 @@ Raw event description:
     
     try:
         response = client.models.generate_content(
-            model='gemini-2.0-flash',
+            model=MODEL_NAME,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
