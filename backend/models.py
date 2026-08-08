@@ -1,1 +1,1 @@
-# Pydantic request/response schemas for APIs and agent communication.
+# Pydantic schemas for project metadata, divisions, contractors, regulatory knowledge base, and schedule tasks.

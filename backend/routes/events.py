@@ -1,1 +1,1 @@
-# Router handling POST /api/events to trigger the multi-agent analysis pipeline and return the reasoning trace.
+# Router handling POST /api/events to run the live query and agent pipeline against current database state.
