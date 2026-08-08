@@ -166,3 +166,31 @@ def test_observe_event_invalid_task_id_from_gemini(mock_genai_client_class):
     assert result["event_type"] == EventType.EXCAVATION.value
     assert result["task_id"] is None
     assert result["task_not_matched"] is True
+
+@patch('backend.agents.observe_agent.genai.Client')
+def test_observe_event_malformed_or_invalid_gemini_response(mock_genai_client_class):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+    
+    # 1. Test malformed JSON syntax response
+    mock_client.models.generate_content.return_value = MockResponse("{malformed-json")
+    result_malformed = observe_event("Raw event text report.")
+    assert result_malformed["event_type"] == EventType.EXCAVATION.value
+    assert result_malformed["task_id"] is None
+    assert result_malformed["severity"] == 1
+    assert result_malformed["task_not_matched"] is True
+
+    # 2. Test schema-invalid JSON response (e.g. invalid event_type, out-of-bounds severity)
+    mock_client.models.generate_content.return_value = MockResponse(
+        json.dumps({
+            "event_type": "non_existent_event_type",
+            "matched_task_id": "T-101",
+            "severity": 15
+        })
+    )
+    result_invalid = observe_event("Raw event text report.")
+    assert result_invalid["event_type"] == EventType.EXCAVATION.value
+    assert result_invalid["task_id"] is None
+    assert result_invalid["severity"] == 1
+    assert result_invalid["task_not_matched"] is True
+
