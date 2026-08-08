@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 from backend.agents.observe_agent import get_api_key
-from backend.config import MODEL_NAME
+from backend.config import MODEL_NAME, use_mock_llm
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -65,7 +65,7 @@ def assess_tradeoff(
         default_reasoning = f"Operations halted due to a non-negotiable regulatory HARD_STOP rule check (rules: {rules_str})."
         
         api_key = get_api_key()
-        if api_key:
+        if api_key and not use_mock_llm():
             client = genai.Client(api_key=api_key)
             prompt = f"""
 You are the Trade-off Agent for ConstructionOS AI.
@@ -98,7 +98,7 @@ WARNING: Do not contradict the decision to halt. Keep it under 100 words.
         default_reasoning = "No regulatory safety hard stop was triggered. Operations are allowed to continue. Financial delay cost exposure could not be assessed."
         
         api_key = get_api_key()
-        if api_key:
+        if api_key and not use_mock_llm():
             client = genai.Client(api_key=api_key)
             prompt = f"""
 You are the Trade-off Agent for ConstructionOS AI.
@@ -128,7 +128,7 @@ WARNING: Do not contradict the decision to continue. Keep it under 100 words.
     # 6. Path D: Both agents are active and safety is not a hard stop (GEMINI TRADE-OFF WEIGHING)
     # We call Gemini to weigh the financial exposure against the event details and make a choice.
     api_key = get_api_key()
-    if not api_key:
+    if not api_key or use_mock_llm():
         # Offline default: if finance is valid and there's no safety hard stop, we prefer to continue
         return {
             "decision": "continue",

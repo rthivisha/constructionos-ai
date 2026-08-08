@@ -8,7 +8,7 @@ from google.genai import types
 
 from backend.agents.observe_agent import get_api_key
 from backend.tools.cpm_engine import get_project_state, get_task_impact, recalculate_schedule
-from backend.config import MODEL_NAME
+from backend.config import MODEL_NAME, use_mock_llm
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -125,7 +125,7 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
     delay_source = None
     api_key = get_api_key()
 
-    if api_key and raw_event_text:
+    if api_key and raw_event_text and not use_mock_llm():
         client = genai.Client(api_key=api_key)
         prompt_extraction = f"""
 You are the Finance Agent for ConstructionOS AI.
@@ -189,7 +189,7 @@ If no delay duration is explicitly mentioned in the text, return null.
 
     # 6. Generate financial summary brief using Gemini
     brief = ""
-    if api_key:
+    if api_key and not use_mock_llm():
         client = genai.Client(api_key=api_key)
         prompt_brief = f"""
 You are the Finance Agent for ConstructionOS AI.
@@ -219,7 +219,16 @@ Please write a brief summary explaining these financial impacts. Your narrative 
             logger.error(f"Gemini brief generation failed: {e}")
             brief = f"Financial evaluation complete. Marginal exposure is {schedule_result['total_financial_exposure']} INR with project delay of {schedule_result['project_delay']} days."
     else:
-        brief = f"Financial evaluation complete. Marginal exposure is {schedule_result['total_financial_exposure']} INR with project delay of {schedule_result['project_delay']} days."
+        prefix = "[MOCK] " if use_mock_llm() else ""
+        brief = (
+            f"{prefix}Financial Impact Assessment: Task {task_id} ({task_name}) delayed by {delay_days} day(s) "
+            f"(source: {delay_source}). Project schedule extends from {schedule_result['baseline_project_duration']} "
+            f"to {schedule_result['new_project_duration']} days ({schedule_result['project_delay']} day project delay). "
+            f"Total marginal financial exposure: ₹{schedule_result['total_financial_exposure']:,.0f} INR "
+            f"(operating cost: ₹{schedule_result['breakdown']['operating_cost_exposure']:,.0f}, "
+            f"penalties: ₹{schedule_result['breakdown']['penalty_exposure']:,.0f}). "
+            f"Contractor: {impact['assigned_crew']}."
+        )
 
     # Return structured schema
     return {
