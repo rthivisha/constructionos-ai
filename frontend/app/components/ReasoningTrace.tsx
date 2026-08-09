@@ -30,6 +30,7 @@ interface ReasoningTraceProps {
       delay_days_used: number | null;
       delay_source: string | null;
       cpm_result: {
+        scope?: string;
         assigned_crew?: string;
         daily_operating_cost?: number;
         contractor_penalty_rate?: number;
@@ -47,6 +48,16 @@ interface ReasoningTraceProps {
         fallback_mode_active?: boolean;
         parse_error: boolean;
       } | null;
+      cost_breakdown?: {
+        scope: string;
+        halted_task_total: number;
+        idle_labour: { amount: number; formula: string; source: string };
+        equipment_extension: { amount: number; formula: string; source: string; warning?: string };
+        delay_penalty: { amount: number; formula: string; source: string };
+        recovery_overtime: { amount: number; formula: string; source: string };
+      } | null;
+      cost_coverage?: string | null;
+      calculation_id?: string | null;
       summary: string;
     };
   } | null;
@@ -311,28 +322,72 @@ export default function ReasoningTrace({ data }: ReasoningTraceProps) {
               </div>
             </div>
 
-            <div>
-              <SectionLabel>Total INR Exposure</SectionLabel>
-              <p className="text-[10px] text-slate-500 mt-0.5 mb-1 leading-snug">Combined operating costs + contractual delay penalties over the halt period</p>
-              <p className="text-2xl font-black text-sky-400 tabular-nums">
-                ₹{financial_assessment.cpm_result?.total_financial_exposure?.toLocaleString("en-IN") ?? "0"}
-              </p>
-              {financial_assessment.cpm_result?.breakdown && (
-                <div className="mt-2 grid grid-cols-2 gap-2 text-xs bg-white/[0.02] rounded-xl p-3 border border-white/6">
-                  <div>
-                    <span className="text-slate-500">Ops Cost</span>
-                    <p className="font-mono font-semibold text-slate-300">
-                      ₹{financial_assessment.cpm_result.breakdown.operating_cost_exposure.toLocaleString("en-IN")}
-                    </p>
+            <div className="space-y-4 pt-2">
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                {/* ─ BLOCK 1: Halted Task Only ─ */}
+                <div className="rounded-xl bg-white/[0.02] border border-white/6 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Halted Task Only</span>
+                    <span className="text-[9px] bg-slate-500/10 text-slate-400 px-2 py-0.5 rounded-full border border-white/5 uppercase font-medium">Local Standby</span>
                   </div>
-                  <div>
-                    <span className="text-slate-500">Penalties</span>
-                    <p className="font-mono font-semibold text-slate-300">
-                      ₹{financial_assessment.cpm_result.breakdown.penalty_exposure.toLocaleString("en-IN")}
-                    </p>
-                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 mb-2 leading-relaxed">Direct standby labor + local contractor penalties on this task alone</p>
+                  <p className="text-2xl font-black text-amber-400 tabular-nums">
+                    ₹{financial_assessment.cost_breakdown?.halted_task_total?.toLocaleString("en-IN") ?? "0"}
+                  </p>
+                  
+                  {financial_assessment.cost_breakdown && (
+                    <div className="mt-3 space-y-2 text-[10px] text-slate-400 border-t border-white/5 pt-2">
+                      <div className="flex justify-between">
+                        <span>Standby Labor:</span>
+                        <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.idle_labour.amount.toLocaleString("en-IN")}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Equip. Extension:</span>
+                        <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.equipment_extension.amount.toLocaleString("en-IN")}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Halt Penalty:</span>
+                        <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.delay_penalty.amount.toLocaleString("en-IN")}</span>
+                      </div>
+                      {financial_assessment.cost_breakdown.equipment_extension.warning && (
+                        <p className="text-[9px] text-amber-500 leading-snug bg-amber-500/5 border border-amber-500/10 p-1.5 rounded-md mt-1.5">
+                          ⚠ {financial_assessment.cost_breakdown.equipment_extension.warning}
+                        </p>
+                      )}
+                    </div>
+                  )}
                 </div>
-              )}
+
+                {/* ─ BLOCK 2: Full Project Impact ─ */}
+                <div className="rounded-xl bg-white/[0.02] border border-white/6 p-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Full Project Impact</span>
+                    <span className="text-[9px] bg-sky-500/10 text-sky-400 px-2 py-0.5 rounded-full border border-white/5 uppercase font-medium">Cascaded</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-1 mb-2 leading-relaxed">Combined daily operating costs + delay penalties across all shifted critical path tasks</p>
+                  <p className="text-2xl font-black text-sky-400 tabular-nums">
+                    ₹{financial_assessment.cpm_result?.total_financial_exposure?.toLocaleString("en-IN") ?? "0"}
+                  </p>
+                  
+                  {financial_assessment.cpm_result?.breakdown && (
+                    <div className="mt-3 space-y-2 text-[10px] text-slate-400 border-t border-white/5 pt-2">
+                      <div className="flex justify-between">
+                        <span>Daily operating cost overhead:</span>
+                        <span className="font-mono text-slate-300">₹{financial_assessment.cpm_result.breakdown.operating_cost_exposure.toLocaleString("en-IN")}</span>
+                      </div>
+                      <div className="flex justify-between">
+                        <span>Downstream delay penalty:</span>
+                        <span className="font-mono text-slate-300">₹{financial_assessment.cpm_result.breakdown.penalty_exposure.toLocaleString("en-IN")}</span>
+                      </div>
+                    </div>
+                  )}
+                </div>
+              </div>
+              
+              <div className="flex justify-between items-center text-[10px] text-slate-500 bg-white/[0.01] px-3 py-1.5 rounded-lg border border-white/5">
+                <span>Calculation ID: <span className="font-mono font-medium text-slate-400">{financial_assessment.calculation_id}</span></span>
+                <span>Cost Coverage: <span className="font-mono font-medium text-slate-400">{financial_assessment.cost_coverage}</span></span>
+              </div>
             </div>
 
             <div>

@@ -341,6 +341,7 @@ If no delay duration is explicitly mentioned in the text, return null.
         "delay_days_used": delay_days,
         "delay_source": delay_source,
         "cpm_result": {
+            "scope": "project_cascade",
             "assigned_crew": impact["assigned_crew"],
             "daily_operating_cost": impact["daily_operating_cost"],
             "contractor_penalty_rate": impact["contractor_penalty_rate"],
@@ -417,9 +418,14 @@ def _build_cost_breakdown(
     # Out of 3 counted fields, only delay_penalty is verified.
     cost_coverage = "1/3 verified, 2 estimated"
     calculation_id = _get_or_create_calculation_id(task_id, delay_days)
+    
+    # Halted task total exposure: sum of local direct costs
+    halted_task_total = idle_labour["amount"] + equipment_extension["amount"] + delay_penalty["amount"] + recovery_overtime["amount"]
 
     return {
         "cost_breakdown": {
+            "scope": "halted_task_only",
+            "halted_task_total": round(halted_task_total, 2),
             "idle_labour": idle_labour,
             "equipment_extension": equipment_extension,
             "delay_penalty": delay_penalty,
