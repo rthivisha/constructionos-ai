@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from backend.agents.observe_agent import observe_event
 from backend.agents.safety_agent import assess_safety
-from backend.agents.finance_agent import assess_finance
+from backend.agents.finance_agent import assess_finance, simulate_delay_range
 from backend.agents.tradeoff_agent import assess_tradeoff
 from backend.tools.cpm_engine import propose_reschedule
 
@@ -54,7 +54,9 @@ async def process_site_event(payload: EventPayload):
         safety_res = {
             "hard_stop": False,
             "triggered_rules": [],
-            "brief": f"Safety assessment unavailable: Agent crashed with error: {safety_res}",
+            "plain_reason": f"Safety assessment unavailable: Agent crashed with error: {safety_res}",
+            "override_risk": "",
+            "exception_mitigation": "",
             "fallback_mode_active": False,
             "parse_error": False,
             "status": "unavailable"
@@ -114,11 +116,62 @@ async def process_site_event(payload: EventPayload):
             "proposed_reschedule": [],
         }
 
-    # 6. Return aggregated pipeline execution output
+    # 6. P3: Avoided-loss calculation
+    # Only computed when propose_reschedule actually ran and produced a recovery plan.
+    # avoided_loss = baseline_exposure (do-nothing) - (recovery_plan_cost + remaining_exposure)
+    # Never fabricated when the proposal did not run.
+    avoided_loss = None
+    try:
+        baseline_exposure = (
+            finance_res.get("cpm_result", {}).get("total_financial_exposure")
+            if isinstance(finance_res, dict) else None
+        )
+        if (
+            reschedule_proposal
+            and reschedule_proposal.get("feasible")
+            and baseline_exposure is not None
+        ):
+            remaining_penalty = reschedule_proposal.get("estimated_remaining_penalty", 0.0)
+            # Recovery plan cost = recovery_overtime from cost_breakdown (currently 0 until applied)
+            recovery_plan_cost = (
+                (finance_res.get("cost_breakdown") or {}).get("recovery_overtime", {}).get("amount", 0.0)
+            )
+            recovery_total = recovery_plan_cost + remaining_penalty
+            avoided = baseline_exposure - recovery_total
+            avoided_loss = {
+                "baseline_exposure": baseline_exposure,
+                "recovery_plan_cost": recovery_plan_cost,
+                "remaining_penalty_after_reallocation": remaining_penalty,
+                "recovery_total": recovery_total,
+                "avoided_loss": round(avoided, 2),
+                "note": (
+                    "avoided_loss = baseline_exposure − (recovery_plan_cost + remaining_penalty). "
+                    "recovery_plan_cost is ₹0 until apply-reschedule is explicitly called."
+                ),
+            }
+    except Exception as e:
+        logger.warning(f"avoided_loss computation failed (non-fatal): {e}")
+
+    # 7. P2: What-if delay range simulation
+    delay_simulation = None
+    try:
+        halted_tid = (
+            finance_res.get("task_id")
+            if isinstance(finance_res, dict) and finance_res.get("status") == "success"
+            else None
+        )
+        if halted_tid:
+            delay_simulation = simulate_delay_range(halted_tid)
+    except Exception as e:
+        logger.warning(f"simulate_delay_range failed (non-fatal): {e}")
+
+    # 8. Return aggregated pipeline execution output
     return {
         "observation": observe_output,
         "safety_assessment": safety_res,
         "financial_assessment": finance_res,
         "tradeoff_reconciliation": tradeoff_res,
         "proposed_reschedule": reschedule_proposal,
+        "avoided_loss": avoided_loss,
+        "delay_simulation": delay_simulation,
     }

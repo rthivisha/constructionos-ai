@@ -172,7 +172,8 @@ def test_finance_agent_happy_path_extraction(mock_genai):
     assert res["cpm_result"]["total_financial_exposure"] > 0
     assert "exposure" in res["summary"].lower() or "financial" in res["summary"].lower()
     assert res["cpm_result"]["parse_error"] is False
-    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
+    # New P1 keys must be present
+    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary", "cost_breakdown", "cost_coverage", "calculation_id"}
 
 @patch('backend.agents.finance_agent.genai.Client')
 def test_finance_agent_happy_path_fallback(mock_genai):
@@ -200,7 +201,8 @@ def test_finance_agent_happy_path_fallback(mock_genai):
     assert res["delay_source"] == "severity_fallback"
     assert res["cpm_result"]["project_delay"] == 3
     assert res["cpm_result"]["parse_error"] is False
-    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
+    # New P1 keys must be present
+    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary", "cost_breakdown", "cost_coverage", "calculation_id"}
 
 def test_finance_agent_insufficient_data():
     observe_output = {
@@ -217,7 +219,9 @@ def test_finance_agent_insufficient_data():
     assert res["task_id"] is None
     assert res["cpm_result"]["total_financial_exposure"] is None
     assert "skipped" in res["summary"].lower() or "no task" in res["summary"].lower()
-    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
+    # New P1 keys must be present (all None for insufficient_data)
+    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary", "cost_breakdown", "cost_coverage", "calculation_id"}
+    assert res["cost_breakdown"] is None
 
 def test_finance_agent_parse_error_halt():
     observe_output = {
@@ -231,7 +235,9 @@ def test_finance_agent_parse_error_halt():
     assert res["status"] == "error"
     assert res["cpm_result"]["parse_error"] is True
     assert "observe agent failed" in res["summary"].lower()
-    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary"}
+    # New P1 keys must be present (all None for parse error path)
+    assert set(res.keys()) == {"status", "task_id", "delay_days_used", "delay_source", "cpm_result", "summary", "cost_breakdown", "cost_coverage", "calculation_id"}
+    assert res["cost_breakdown"] is None
 
 
 # --- INDEPENDENCE VERIFICATION ---
