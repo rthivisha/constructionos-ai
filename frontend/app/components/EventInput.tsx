@@ -127,6 +127,7 @@ export default function EventInput() {
       {result && (
         <div className="space-y-8 animate-fadeIn">
           <ReasoningTrace 
+            key={result.financial_assessment?.calculation_id || result.observation?.task_id || "trace-reset"}
             data={result} 
             rawText={eventText} 
             onReset={() => {

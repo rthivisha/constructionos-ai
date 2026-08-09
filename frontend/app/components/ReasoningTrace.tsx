@@ -197,33 +197,26 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
           {steps.map((step, idx) => {
             const Icon = step.icon;
             const isActive = activeStage === step.stage;
-            const isCompleted = step.stage < activeStage;
-            const isDisabled = step.stage > activeStage;
             
             return (
               <React.Fragment key={step.stage}>
                 <button
                   type="button"
-                  disabled={isDisabled}
-                  onClick={() => !isDisabled && setActiveStage(step.stage as any)}
+                  onClick={() => setActiveStage(step.stage as any)}
                   className={cn(
-                    "flex flex-col sm:flex-row items-center gap-2.5 px-4 py-2.5 rounded-xl border transition-all text-left focus:outline-none",
+                    "flex flex-col sm:flex-row items-center gap-2.5 px-4 py-2.5 rounded-xl border transition-all text-left focus:outline-none cursor-pointer",
                     isActive
-                      ? "border-sky-500/30 text-sky-400 bg-sky-500/10 shadow-[0_0_20px_-5px_rgba(56,189,248,0.15)] font-semibold"
-                      : isCompleted
-                        ? "border-emerald-500/20 text-emerald-400 bg-emerald-500/5 cursor-pointer hover:bg-emerald-500/10"
-                        : "border-white/5 text-slate-500 cursor-not-allowed opacity-50"
+                      ? "border-sky-500 text-sky-400 bg-sky-500/10 shadow-[0_0_20px_-5px_rgba(56,189,248,0.15)] font-semibold"
+                      : "border-white/5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
                   )}
                 >
                   <div className={cn(
                     "flex items-center justify-center w-6 h-6 rounded-lg text-xs shrink-0",
                     isActive
                       ? "bg-sky-500/20 text-sky-400"
-                      : isCompleted
-                        ? "bg-emerald-500/20 text-emerald-400"
-                        : "bg-white/5 text-slate-500"
+                      : "bg-white/5 text-slate-500"
                   )}>
-                    {isCompleted ? <CheckCircle2 className="w-3.5 h-3.5" /> : <Icon className="w-3.5 h-3.5" />}
+                    <Icon className="w-3.5 h-3.5" />
                   </div>
                   <div className="text-center sm:text-left">
                     <p className="text-[9px] uppercase tracking-widest opacity-60">Stage {step.stage}</p>
@@ -231,10 +224,7 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                   </div>
                 </button>
                 {idx < steps.length - 1 && (
-                  <div className={cn(
-                    "hidden sm:block h-px flex-1 border-t border-dashed transition-colors duration-300",
-                    isCompleted ? "border-emerald-500/30" : "border-white/6"
-                  )} />
+                  <div className="hidden sm:block h-px flex-1 border-t border-dashed border-white/6" />
                 )}
               </React.Fragment>
             );
