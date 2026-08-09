@@ -9,6 +9,10 @@ import os
 # To switch models, change this single constant — all 4 agents import from here.
 MODEL_NAME = "gemini-3.5-flash-lite"
 
+# Assumed daily wage rate per worker (₹) - placeholder assumption for labour cost calculations
+ASSUMED_DAILY_WAGE_PER_WORKER = 1500
+
+
 
 def use_mock_llm() -> bool:
     """

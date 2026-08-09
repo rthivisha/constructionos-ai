@@ -1,6 +1,8 @@
 import logging
 import json
 import re
+import os
+import sqlite3
 from typing import Dict, Any, Optional, List
 from pydantic import BaseModel, Field
 from google import genai
@@ -8,7 +10,8 @@ from google.genai import types
 
 from backend.agents.observe_agent import get_api_key
 from backend.tools.cpm_engine import get_project_state, get_task_impact, recalculate_schedule
-from backend.config import MODEL_NAME, use_mock_llm
+import backend.db
+from backend.config import MODEL_NAME, use_mock_llm, ASSUMED_DAILY_WAGE_PER_WORKER
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -33,6 +36,62 @@ class DelayExtractionSchema(BaseModel):
     delay_days: Optional[int] = Field(None, description="The delay in days explicitly mentioned in the text. Set to null if not explicitly mentioned.")
 
 
+def _get_or_create_calculation_id(task_id: str, delay_days: int) -> str:
+    """
+    Returns a sequential integer calculation ID starting with FIN-, persisted in SQLite.
+    If the DB is not found or fails, falls back to a stable in-memory cache for idempotency.
+    """
+    db_path = getattr(backend.db, "DB_PATH", None)
+    if db_path and os.path.exists(db_path):
+        try:
+            conn = sqlite3.connect(db_path)
+            cursor = conn.cursor()
+            cursor.execute("""
+            CREATE TABLE IF NOT EXISTS finance_calculations (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                task_id TEXT NOT NULL,
+                delay_days INTEGER NOT NULL,
+                UNIQUE(task_id, delay_days)
+            );
+            """)
+            # Query first to avoid autoincrement leaks on INSERT conflicts
+            cursor.execute(
+                "SELECT id FROM finance_calculations WHERE task_id = ? AND delay_days = ?;",
+                (task_id, delay_days)
+            )
+            row = cursor.fetchone()
+            if row:
+                conn.close()
+                return f"FIN-{row[0]}"
+
+            # Insert if not exists
+            cursor.execute(
+                "INSERT INTO finance_calculations (task_id, delay_days) VALUES (?, ?);",
+                (task_id, delay_days)
+            )
+            conn.commit()
+            
+            cursor.execute(
+                "SELECT id FROM finance_calculations WHERE task_id = ? AND delay_days = ?;",
+                (task_id, delay_days)
+            )
+            row = cursor.fetchone()
+            conn.close()
+            if row:
+                return f"FIN-{row[0]}"
+        except Exception as e:
+            logger.warning(f"Error checking sequential calculation ID in database: {e}")
+
+    # Fallback to local cache
+    global _fallback_seq_ids
+    if not hasattr(_get_or_create_calculation_id, "_fallback_seq_ids"):
+        _get_or_create_calculation_id._fallback_seq_ids = {}
+    key = (task_id, delay_days)
+    if key not in _get_or_create_calculation_id._fallback_seq_ids:
+        _get_or_create_calculation_id._fallback_seq_ids[key] = len(_get_or_create_calculation_id._fallback_seq_ids) + 1
+    return f"FIN-{_get_or_create_calculation_id._fallback_seq_ids[key]}"
+
+
 def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str] = None) -> Dict[str, Any]:
     """
     Estimates project schedule delays and calculates marginal financial exposure
@@ -40,8 +99,8 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
 
     Returns (in addition to existing fields):
       cost_breakdown: itemized breakdown with assumption labels and source tags
-      cost_coverage: e.g. "1/4 verified, 3 estimated"
-      calculation_id: deterministic FIN-{task_id}-{delay_days}d
+      cost_coverage: "1/3 verified, 2 estimated"
+      calculation_id: FIN-{sequential integer, persisted in DB}
     """
     # 1. Handle upstream parse errors
     if observe_output.get("parse_error"):
@@ -262,7 +321,6 @@ If no delay duration is explicitly mentioned in the text, return null.
         )
 
     # 7. Build itemized cost breakdown (P1)
-    # active_workers comes from the contractor row in the project state
     contractor_row = next(
         (c for c in state.get("contractors", []) if c["name"] == impact["assigned_crew"]),
         {}
@@ -294,6 +352,7 @@ If no delay duration is explicitly mentioned in the text, return null.
             "breakdown": schedule_result["breakdown"],
             "tasks": schedule_result["tasks"],
             "halted_task_id": task_id,
+            "delay_days": delay_days,
             "fallback_mode_active": schedule_result["fallback_mode_active"] or state_fallback,
             "parse_error": False
         },
@@ -316,64 +375,48 @@ def _build_cost_breakdown(
 ) -> Dict[str, Any]:
     """
     Builds an itemized cost breakdown with explicit assumption labels and source tags.
-
-    Rules:
-    - delay_penalty is the ONLY "verified" field — it comes directly from
-      contractors.daily_delay_penalty and requires no assumptions.
-    - idle_labour, equipment_extension, recovery_overtime all carry "assumed"
-      source tags because they require formula-based decomposition of the
-      daily_operating_cost bundle (which the DB stores as a single figure).
     """
     # ── idle_labour ──────────────────────────────────────────────────────────
-    # The DB stores daily_operating_cost as a contract-level bundle.
-    # We attribute the full bundle to standby crew cost during the halt.
-    rate_per_worker = daily_operating_cost / active_workers if active_workers else 0.0
-    idle_labour_amount = daily_operating_cost * delay_days
+    idle_labour_amount = active_workers * ASSUMED_DAILY_WAGE_PER_WORKER * delay_days
     idle_labour = {
         "amount": round(idle_labour_amount, 2),
-        "assumption": (
-            f"{active_workers} workers \u00d7 \u20b9{rate_per_worker:,.0f}/worker/day \u00d7 {delay_days} day(s) "
-            f"(full daily_operating_cost bundle attributed to standby crew)"
-        ),
-        "source": "assumed",
+        "formula": f"{active_workers} workers \u00d7 \u20b9{ASSUMED_DAILY_WAGE_PER_WORKER}/day \u00d7 {delay_days} days",
+        "source": "assumed_wage_rate"
     }
 
     # ── equipment_extension ──────────────────────────────────────────────────
-    # Not stored separately — daily_operating_cost bundle assumed to cover it.
+    daily_labor_cost = active_workers * ASSUMED_DAILY_WAGE_PER_WORKER
+    daily_equip_cost = daily_operating_cost - daily_labor_cost
+    is_negative = daily_equip_cost < 0
+
+    equip_amount = max(0.0, daily_equip_cost) * delay_days
     equipment_extension = {
-        "amount": 0.0,
-        "assumption": (
-            "Equipment demurrage not stored separately in contractors table. "
-            "daily_operating_cost bundle is assumed to cover all equipment hire. "
-            "Enter a site-specific figure to override."
-        ),
-        "source": "assumed",
+        "amount": round(equip_amount, 2),
+        "formula": "(daily_operating_cost - (active_workers \u00d7 assumed_wage)) \u00d7 delay_days \u2014 residual after estimated labour",
+        "source": "assumed_residual"
     }
+    if is_negative:
+        equipment_extension["warning"] = "assumed wage rate exceeds contractor's recorded daily operating cost \u2014 labour/equipment split unreliable for this contractor"
 
     # ── delay_penalty ────────────────────────────────────────────────────────
-    # Direct from contractors.daily_delay_penalty — no assumption required.
-    # This is the only "verified" field per spec.
     penalty_amount = contractor_penalty_rate * delay_days
     delay_penalty = {
         "amount": round(penalty_amount, 2),
-        "source": "verified",
+        "formula": "contractor_penalty_rate \u00d7 delay_days",
+        "source": "verified"
     }
 
     # ── recovery_overtime ────────────────────────────────────────────────────
-    # Set to zero until a reschedule plan is approved and applied.
     recovery_overtime = {
         "amount": 0.0,
-        "assumption": (
-            f"Overtime recovery cost = 1.5 \u00d7 \u20b9{daily_operating_cost:,.0f}/day \u00d7 catch-up days. "
-            "Set to \u20b90 until a reschedule plan is approved and applied via /api/schedule/apply-reschedule."
-        ),
-        "source": "assumed",
+        "formula": "populated only if propose_reschedule has run and reassigns crew hours; otherwise 0 and omitted from coverage count",
+        "source": "assumed"
     }
 
-    verified_count = 1  # only delay_penalty
-    total_count = 4
-    cost_coverage = f"{verified_count}/{total_count} verified, {total_count - verified_count} estimated"
-    calculation_id = f"FIN-{task_id}-{delay_days}d"
+    # Coverage count: recovery_overtime is omitted from count because it's 0.
+    # Out of 3 counted fields, only delay_penalty is verified.
+    cost_coverage = "1/3 verified, 2 estimated"
+    calculation_id = _get_or_create_calculation_id(task_id, delay_days)
 
     return {
         "cost_breakdown": {
@@ -390,33 +433,36 @@ def _build_cost_breakdown(
 # ---------------------------------------------------------------------------
 # P2: What-if delay range simulator
 # ---------------------------------------------------------------------------
-def simulate_delay_range(task_id: str) -> List[Dict[str, Any]]:
+def simulate_delay_range(task_id: str) -> Dict[str, Any]:
     """
-    Calls the existing recalculate_schedule (the already-verified CPM engine)
-    for delay_days = 1, 2, 3 and returns total_financial_exposure for each.
-    No new math — purely a loop over recalculate_schedule.
-
-    Args:
-        task_id: The task to simulate delays for.
-
-    Returns:
-        List of dicts: [{delay_days, project_delay, total_financial_exposure}, ...]
+    Calls the existing recalculate_schedule from cpm_engine.py for delay_days = 1, 2, 3.
+    Returns: {"1_day": total_financial_exposure, "2_day": ..., "3_day": ...}
+    No new CPM logic — this must call the already-tested function three times, not reimplement anything.
     """
-    results = []
-    for d in [1, 2, 3]:
-        try:
-            r = recalculate_schedule(task_id, d)
-            results.append({
-                "delay_days": d,
-                "project_delay": r["project_delay"],
-                "total_financial_exposure": r["total_financial_exposure"],
-            })
-        except Exception as e:
-            logger.warning(f"simulate_delay_range: recalculate_schedule({task_id}, {d}) failed: {e}")
-            results.append({
-                "delay_days": d,
-                "project_delay": None,
-                "total_financial_exposure": None,
-                "error": str(e),
-            })
-    return results
+    res1 = recalculate_schedule(task_id, 1)
+    res2 = recalculate_schedule(task_id, 2)
+    res3 = recalculate_schedule(task_id, 3)
+    return {
+        "1_day": res1["total_financial_exposure"],
+        "2_day": res2["total_financial_exposure"],
+        "3_day": res3["total_financial_exposure"],
+    }
+
+
+# ---------------------------------------------------------------------------
+# P3: Avoided-loss calculation
+# ---------------------------------------------------------------------------
+def calculate_avoided_loss(baseline_exposure: float, reschedule_output: dict) -> dict:
+    """
+    avoided_loss = baseline_exposure - (reschedule_output's remaining exposure + any recovery cost)
+    """
+    remaining_exposure = reschedule_output.get("estimated_remaining_penalty", 0.0)
+    # Recovery cost is 0 since we do not have recovery overtime costs applied yet
+    recovery_cost = 0.0
+    avoided = baseline_exposure - (remaining_exposure + recovery_cost)
+    return {
+        "avoided_loss": round(avoided, 2),
+        "baseline_exposure": baseline_exposure,
+        "remaining_exposure": remaining_exposure,
+        "recovery_cost": recovery_cost
+    }

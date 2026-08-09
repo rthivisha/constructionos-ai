@@ -5,7 +5,7 @@ from pydantic import BaseModel
 
 from backend.agents.observe_agent import observe_event
 from backend.agents.safety_agent import assess_safety
-from backend.agents.finance_agent import assess_finance, simulate_delay_range
+from backend.agents.finance_agent import assess_finance, simulate_delay_range, calculate_avoided_loss
 from backend.agents.tradeoff_agent import assess_tradeoff
 from backend.tools.cpm_engine import propose_reschedule
 
@@ -91,6 +91,7 @@ async def process_site_event(payload: EventPayload):
 
     # 5. Propose a reschedule if CPM produced a valid result (proposal only, no DB write)
     reschedule_proposal = None
+    propose_reschedule_ran = False
     try:
         cpm_result = finance_res.get("cpm_result") if isinstance(finance_res, dict) else None
         if (
@@ -100,6 +101,7 @@ async def process_site_event(payload: EventPayload):
             and not cpm_result.get("parse_error", False)
         ):
             reschedule_proposal = propose_reschedule(cpm_result)
+            propose_reschedule_ran = True
         else:
             reschedule_proposal = {
                 "feasible": False,
@@ -117,40 +119,18 @@ async def process_site_event(payload: EventPayload):
         }
 
     # 6. P3: Avoided-loss calculation
-    # Only computed when propose_reschedule actually ran and produced a recovery plan.
-    # avoided_loss = baseline_exposure (do-nothing) - (recovery_plan_cost + remaining_exposure)
-    # Never fabricated when the proposal did not run.
-    avoided_loss = None
-    try:
-        baseline_exposure = (
-            finance_res.get("cpm_result", {}).get("total_financial_exposure")
-            if isinstance(finance_res, dict) else None
-        )
-        if (
-            reschedule_proposal
-            and reschedule_proposal.get("feasible")
-            and baseline_exposure is not None
-        ):
-            remaining_penalty = reschedule_proposal.get("estimated_remaining_penalty", 0.0)
-            # Recovery plan cost = recovery_overtime from cost_breakdown (currently 0 until applied)
-            recovery_plan_cost = (
-                (finance_res.get("cost_breakdown") or {}).get("recovery_overtime", {}).get("amount", 0.0)
+    # Only callable when propose_reschedule's output exists for this event.
+    avoided_loss_result = None
+    if propose_reschedule_ran and reschedule_proposal:
+        try:
+            baseline_exposure = (
+                finance_res.get("cpm_result", {}).get("total_financial_exposure")
+                if isinstance(finance_res, dict) else None
             )
-            recovery_total = recovery_plan_cost + remaining_penalty
-            avoided = baseline_exposure - recovery_total
-            avoided_loss = {
-                "baseline_exposure": baseline_exposure,
-                "recovery_plan_cost": recovery_plan_cost,
-                "remaining_penalty_after_reallocation": remaining_penalty,
-                "recovery_total": recovery_total,
-                "avoided_loss": round(avoided, 2),
-                "note": (
-                    "avoided_loss = baseline_exposure − (recovery_plan_cost + remaining_penalty). "
-                    "recovery_plan_cost is ₹0 until apply-reschedule is explicitly called."
-                ),
-            }
-    except Exception as e:
-        logger.warning(f"avoided_loss computation failed (non-fatal): {e}")
+            if baseline_exposure is not None:
+                avoided_loss_result = calculate_avoided_loss(baseline_exposure, reschedule_proposal)
+        except Exception as e:
+            logger.warning(f"avoided_loss computation failed (non-fatal): {e}")
 
     # 7. P2: What-if delay range simulation
     delay_simulation = None
@@ -166,12 +146,16 @@ async def process_site_event(payload: EventPayload):
         logger.warning(f"simulate_delay_range failed (non-fatal): {e}")
 
     # 8. Return aggregated pipeline execution output
-    return {
+    response_dict = {
         "observation": observe_output,
         "safety_assessment": safety_res,
         "financial_assessment": finance_res,
         "tradeoff_reconciliation": tradeoff_res,
         "proposed_reschedule": reschedule_proposal,
-        "avoided_loss": avoided_loss,
         "delay_simulation": delay_simulation,
     }
+    # Priority 3: avoided_loss must be entirely absent if propose_reschedule hasn't run
+    if propose_reschedule_ran and avoided_loss_result is not None:
+        response_dict["avoided_loss"] = avoided_loss_result
+
+    return response_dict

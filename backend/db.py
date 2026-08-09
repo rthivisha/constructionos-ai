@@ -65,6 +65,15 @@ def init_db():
     );
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS finance_calculations (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        task_id TEXT NOT NULL,
+        delay_days INTEGER NOT NULL,
+        UNIQUE(task_id, delay_days)
+    );
+    """)
+
     conn.commit()
 
     # Check if project_meta is empty -> Seed the database
