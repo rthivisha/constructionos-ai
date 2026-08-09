@@ -16,6 +16,12 @@ async function handleResponse(response: Response) {
   return response.json();
 }
 
+export interface AttachmentPayload {
+  filename: string;
+  content_type: string;
+  data: string; // Base64 representation
+}
+
 export const api = {
   async getProjectSetup() {
     const res = await fetch(`${API_BASE_URL}/api/project-setup`, {
@@ -82,13 +88,16 @@ export const api = {
     return handleResponse(res);
   },
 
-  async processSiteEvent(eventText: string) {
+  async processSiteEvent(eventText: string, attachment?: AttachmentPayload | null) {
     const res = await fetch(`${API_BASE_URL}/api/events`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ event_text: eventText }),
+      body: JSON.stringify({
+        event_text: eventText,
+        attachment: attachment || null
+      }),
     });
     return handleResponse(res);
   },

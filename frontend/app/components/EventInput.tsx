@@ -1,12 +1,19 @@
-import React, { useState } from 'react';
+import React, { useState, useRef } from 'react';
 import { api } from '../lib/api';
 import ReasoningTrace from './ReasoningTrace';
+import { Paperclip, X, FileText, Image } from 'lucide-react';
 
 export default function EventInput() {
   const [eventText, setEventText] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [result, setResult] = useState<any>(null);
+
+  // File upload state
+  const [selectedFile, setSelectedFile] = useState<File | null>(null);
+  const [fileBase64, setFileBase64] = useState<string | null>(null);
+  const [attachmentError, setAttachmentError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Predefined quick-test templates
   const templates = [
@@ -29,6 +36,51 @@ export default function EventInput() {
     setError(null);
   };
 
+  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
+    setAttachmentError(null);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    // 1. Restrict content_type to an explicit allowlist
+    const allowedTypes = ['image/png', 'image/jpeg', 'application/pdf'];
+    if (!allowedTypes.includes(file.type)) {
+      setAttachmentError('Only PNG, JPEG, and PDF files are allowed.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    // 2. Enforce 5MB limit
+    const maxSizeBytes = 5 * 1024 * 1024;
+    if (file.size > maxSizeBytes) {
+      setAttachmentError('File size exceeds the maximum limit of 5MB.');
+      if (fileInputRef.current) fileInputRef.current.value = '';
+      return;
+    }
+
+    setSelectedFile(file);
+
+    // 3. Convert to base64
+    const reader = new FileReader();
+    reader.onloadend = () => {
+      setFileBase64(reader.result as string);
+    };
+    reader.onerror = () => {
+      setAttachmentError('Failed to read the file.');
+      setSelectedFile(null);
+      setFileBase64(null);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleRemoveFile = () => {
+    setSelectedFile(null);
+    setFileBase64(null);
+    setAttachmentError(null);
+    if (fileInputRef.current) {
+      fileInputRef.current.value = '';
+    }
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!eventText.trim()) return;
@@ -37,9 +89,20 @@ export default function EventInput() {
     setError(null);
     setResult(null);
 
+    let attachmentPayload = null;
+    if (selectedFile && fileBase64) {
+      attachmentPayload = {
+        filename: selectedFile.name,
+        content_type: selectedFile.type,
+        data: fileBase64
+      };
+    }
+
     try {
-      const data = await api.processSiteEvent(eventText);
+      const data = await api.processSiteEvent(eventText, attachmentPayload);
       setResult(data);
+      // Clear file selection on successful process
+      handleRemoveFile();
     } catch (err: any) {
       console.error(err);
       setError(err.message || 'An error occurred while submitting the event report.');
@@ -89,11 +152,55 @@ export default function EventInput() {
             ))}
           </div>
 
-          <div className="flex justify-end pt-2 border-t border-slate-850">
+          {attachmentError && (
+            <div className="rounded-lg bg-red-950/20 border border-red-500/20 px-4 py-2.5 text-xs text-red-400 font-medium">
+              ⚠ {attachmentError}
+            </div>
+          )}
+
+          <div className="flex flex-col sm:flex-row gap-3 items-stretch sm:items-center justify-between pt-3 border-t border-slate-800">
+            {/* Attachment Button & File Preview info */}
+            <div className="flex flex-wrap items-center gap-2">
+              <input
+                type="file"
+                ref={fileInputRef}
+                onChange={handleFileChange}
+                accept="image/png, image/jpeg, application/pdf"
+                className="hidden"
+              />
+              <button
+                type="button"
+                onClick={() => fileInputRef.current?.click()}
+                className="inline-flex items-center gap-1.5 rounded-lg border border-slate-700 bg-slate-950/60 px-3.5 py-2 text-xs font-semibold text-slate-300 transition hover:bg-slate-800 hover:text-slate-100 focus:outline-none focus:ring-1 focus:ring-blue-500"
+              >
+                <Paperclip className="h-3.5 w-3.5 text-slate-400" />
+                Attach Site Map / Document
+              </button>
+              
+              {selectedFile && (
+                <div className="flex items-center gap-2 rounded-lg bg-slate-850 border border-slate-700 px-3 py-1.5 text-xs text-slate-200">
+                  {selectedFile.type.startsWith('image/') ? (
+                    <Image className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                  ) : (
+                    <FileText className="h-3.5 w-3.5 text-blue-400 shrink-0" />
+                  )}
+                  <span className="font-medium max-w-[130px] truncate">{selectedFile.name}</span>
+                  <span className="text-[10px] text-slate-500 font-mono">({(selectedFile.size / 1024).toFixed(0)} KB)</span>
+                  <button
+                    type="button"
+                    onClick={handleRemoveFile}
+                    className="rounded p-0.5 text-slate-400 hover:bg-slate-700 hover:text-slate-200 focus:outline-none shrink-0"
+                  >
+                    <X className="h-3 w-3" />
+                  </button>
+                </div>
+              )}
+            </div>
+
             <button
               type="submit"
               disabled={loading || !eventText.trim()}
-              className="inline-flex items-center gap-2 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed"
+              className="inline-flex items-center justify-center gap-2 rounded-lg bg-blue-600 px-6 py-2.5 text-sm font-bold text-white transition hover:bg-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 focus:ring-offset-2 focus:ring-offset-slate-900 disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {loading ? (
                 <>

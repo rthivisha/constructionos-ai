@@ -14,7 +14,9 @@ import {
   ArrowLeft,
   RotateCcw,
   MessageSquare,
-  FileDown
+  FileDown,
+  Paperclip,
+  FileText
 } from "lucide-react";
 
 interface ReasoningTraceProps {
@@ -75,6 +77,11 @@ interface ReasoningTraceProps {
       rejected_alternative: "halt" | "continue";
       rejected_because: string;
     };
+    attachment?: {
+      filename: string;
+      url: string;
+      content_type: string;
+    } | null;
   };
   rawText?: string;
   onReset?: () => void;
@@ -302,6 +309,50 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                 </pre>
               </div>
             </div>
+
+            {data.attachment && (
+              <div className="animate-in fade-in slide-in-from-bottom-2 duration-300">
+                <SectionLabel>Attached Site Map / Document</SectionLabel>
+                <div className="mt-1.5 rounded-xl border border-white/6 bg-white/[0.01] p-4 flex flex-col sm:flex-row items-start sm:items-center gap-4">
+                  {data.attachment.content_type.startsWith("image/") ? (
+                    <div className="relative group shrink-0 rounded-lg overflow-hidden border border-white/10 bg-slate-950 w-24 h-24 sm:w-32 sm:h-32 flex items-center justify-center">
+                      <img 
+                        src={`http://localhost:8000${data.attachment.url}`} 
+                        alt={data.attachment.filename}
+                        className="w-full h-full object-cover transition-transform duration-300 group-hover:scale-105"
+                      />
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-white/10 bg-slate-950 p-4 shrink-0 flex items-center justify-center w-24 h-24 sm:w-32 sm:h-32">
+                      <FileText className="w-12 h-12 text-blue-400" />
+                    </div>
+                  )}
+
+                  <div className="space-y-1.5">
+                    <p className="text-sm font-bold text-slate-200">{data.attachment.filename}</p>
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-[10px] uppercase font-bold tracking-wider px-2 py-0.5 rounded bg-white/5 text-slate-400 border border-white/5">
+                        {data.attachment.content_type.split("/")[1].toUpperCase()}
+                      </span>
+                      <span className="text-[10px] text-slate-500 font-medium">Saved to Event Record</span>
+                    </div>
+                    <p className="text-[11px] text-slate-500 leading-normal max-w-md font-light">
+                      This document is stored in the operation log for record-keeping and audit validation. No autonomous agents were allowed to parse or read this file.
+                    </p>
+                    <a 
+                      href={`http://localhost:8000${data.attachment.url}`} 
+                      download={data.attachment.filename}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className="inline-flex items-center gap-1.5 text-xs text-sky-400 hover:text-sky-300 font-bold transition pt-1"
+                    >
+                      <FileDown className="w-3.5 h-3.5" />
+                      Download/View Attached File
+                    </a>
+                  </div>
+                </div>
+              </div>
+            )}
 
             {/* Bottom Action Bar */}
             <div className="pt-4 border-t border-white/6 flex justify-between items-center">

@@ -23,8 +23,8 @@ def use_mock_llm() -> bool:
     use python-dotenv.
     """
     val = os.getenv("USE_MOCK_LLM", "").strip().lower()
-    if val == "true":
-        return True
+    if val:
+        return val == "true"
     # Direct file fallback
     for dotenv_path in ["backend/.env", ".env"]:
         if os.path.exists(dotenv_path):

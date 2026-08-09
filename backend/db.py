@@ -74,6 +74,18 @@ def init_db():
     );
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS site_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        event_text TEXT NOT NULL,
+        filename TEXT,
+        file_path TEXT,
+        content_type TEXT,
+        pipeline_response TEXT,
+        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     conn.commit()
 
     # Check if project_meta is empty -> Seed the database

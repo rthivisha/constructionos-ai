@@ -1,5 +1,11 @@
 import asyncio
 import logging
+import base64
+import uuid
+import os
+import sqlite3
+import json
+from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 
@@ -8,14 +14,21 @@ from backend.agents.safety_agent import assess_safety
 from backend.agents.finance_agent import assess_finance, simulate_delay_range, calculate_avoided_loss
 from backend.agents.tradeoff_agent import assess_tradeoff
 from backend.tools.cpm_engine import propose_reschedule
+import backend.db
 
 # Configure logging
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/events", tags=["events"])
 
+class AttachmentPayload(BaseModel):
+    filename: str
+    content_type: str
+    data: str # Base64 encoded
+
 class EventPayload(BaseModel):
     event_text: str
+    attachment: Optional[AttachmentPayload] = None
 
 @router.post("")
 async def process_site_event(payload: EventPayload):
@@ -24,6 +37,68 @@ async def process_site_event(payload: EventPayload):
     and financial CPM delay recalculations in parallel, and reconciles tradeoffs.
     """
     logger.info(f"Ingesting new site event: '{payload.event_text[:60]}...'")
+    
+    # Process attachment if present
+    attachment_metadata = None
+    if payload.attachment:
+        # 1. Restrict content_type to an explicit allowlist
+        allowed_types = ["image/png", "image/jpeg", "application/pdf"]
+        if payload.attachment.content_type not in allowed_types:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Unsupported file type '{payload.attachment.content_type}'. Only PNG, JPEG, and PDF are allowed."
+            )
+
+        # 2. Decode base64 data
+        try:
+            b64_data = payload.attachment.data
+            if "," in b64_data:
+                b64_data = b64_data.split(",", 1)[1]
+            decoded_bytes = base64.b64decode(b64_data)
+        except Exception as e:
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid file attachment data: {e}"
+            )
+
+        # 3. Enforce 5MB limit
+        if len(decoded_bytes) > 5 * 1024 * 1024:
+            raise HTTPException(
+                status_code=400,
+                detail="File size exceeds the maximum limit of 5MB."
+            )
+
+        # 4. Sanitize and generate unique filename with validated extension
+        ext_map = {
+            "image/png": ".png",
+            "image/jpeg": ".jpg",
+            "application/pdf": ".pdf"
+        }
+        ext = ext_map[payload.attachment.content_type]
+        unique_filename = f"{uuid.uuid4()}{ext}"
+
+        # 5. Save to local backend/uploads folder
+        current_dir = os.path.dirname(os.path.abspath(__file__))
+        uploads_dir = os.path.join(os.path.dirname(current_dir), "uploads")
+        os.makedirs(uploads_dir, exist_ok=True)
+        file_path = os.path.join(uploads_dir, unique_filename)
+        
+        try:
+            with open(file_path, "wb") as f:
+                f.write(decoded_bytes)
+        except Exception as e:
+            logger.error(f"Failed to save file to disk: {e}")
+            raise HTTPException(
+                status_code=500,
+                detail=f"Could not store attachment: {e}"
+            )
+
+        # 6. Save metadata
+        attachment_metadata = {
+            "filename": os.path.basename(payload.attachment.filename),
+            "url": f"/uploads/{unique_filename}",
+            "content_type": payload.attachment.content_type
+        }
     
     # 1. Observation Stage (Extract events and task IDs)
     try:
@@ -157,5 +232,32 @@ async def process_site_event(payload: EventPayload):
     # Priority 3: avoided_loss must be entirely absent if propose_reschedule hasn't run
     if propose_reschedule_ran and avoided_loss_result is not None:
         response_dict["avoided_loss"] = avoided_loss_result
+
+    if attachment_metadata:
+        response_dict["attachment"] = attachment_metadata
+
+    # 9. Save to database (site_events table)
+    try:
+        conn = sqlite3.connect(backend.db.DB_PATH)
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT INTO site_events (event_text, filename, file_path, content_type, pipeline_response)
+            VALUES (?, ?, ?, ?, ?);
+            """,
+            (
+                payload.event_text,
+                attachment_metadata["filename"] if attachment_metadata else None,
+                attachment_metadata["url"] if attachment_metadata else None,
+                attachment_metadata["content_type"] if attachment_metadata else None,
+                json.dumps(response_dict)
+            )
+        )
+        conn.commit()
+    except Exception as db_err:
+        logger.error(f"Failed to record site event in database: {db_err}")
+    finally:
+        if 'conn' in locals():
+            conn.close()
 
     return response_dict

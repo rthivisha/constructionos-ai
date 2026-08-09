@@ -2,12 +2,18 @@
 import os
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.staticfiles import StaticFiles
 from backend.db import init_db
 from backend.routes.project_setup import router as project_setup_router
 from backend.routes.events import router as events_router
 from backend.routes.schedule import router as schedule_router
 
 app = FastAPI(title="ConstructionOS AI Backend")
+
+# Ensure uploads directory exists and mount it
+uploads_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "uploads")
+os.makedirs(uploads_dir, exist_ok=True)
+app.mount("/uploads", StaticFiles(directory=uploads_dir), name="uploads")
 
 # Initialize database and seed tables on startup
 @app.on_event("startup")

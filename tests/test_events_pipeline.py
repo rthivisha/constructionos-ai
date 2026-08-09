@@ -245,7 +245,9 @@ def test_pipeline_both_crash_simultaneously(mock_finance, mock_safety, mock_obse
     assert "unavailable" in tradeoff["reasoning"].lower()
 
 @patch('google.genai.Client')
-def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class):
+def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class, monkeypatch):
+    monkeypatch.setenv("USE_MOCK_LLM", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "dummy-key-for-test")
     mock_client = MagicMock()
     mock_client_class.return_value = mock_client
     
@@ -283,7 +285,6 @@ def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class):
     assert response.status_code == 200
     
     data = response.json()
-    
     # Verify the real, unmocked output schemas were successfully processed and matched
     assert data["observation"]["event_type"] == "excavation"
     assert data["observation"]["task_id"] == "T-102"
@@ -304,3 +305,110 @@ def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class):
     
     assert data["tradeoff_reconciliation"]["decision"] == "continue"
     assert data["tradeoff_reconciliation"]["rejected_alternative"] == "halt"
+
+
+@patch('backend.routes.events.observe_event')
+@patch('backend.routes.events.assess_safety')
+@patch('backend.routes.events.assess_finance')
+@patch('backend.routes.events.assess_tradeoff')
+def test_pipeline_with_attachment(mock_tradeoff, mock_finance, mock_safety, mock_observe):
+    import base64
+    import backend.routes.events
+    
+    mock_observe.return_value = {
+        "event_type": "excavation",
+        "task_id": "T-102",
+        "severity": 4,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    mock_safety.return_value = {
+        "hard_stop": False,
+        "triggered_rules": [],
+        "brief": "Safety check complete, no regulatory violation.",
+        "fallback_mode_active": False,
+        "parse_error": False
+    }
+    mock_finance.return_value = {
+        "status": "success",
+        "task_id": "T-102",
+        "delay_days_used": 2,
+        "delay_source": "severity_fallback",
+        "cpm_result": {
+            "assigned_crew": "L&T Construction",
+            "project_delay": 2,
+            "total_financial_exposure": 400000.0,
+            "parse_error": False
+        },
+        "summary": "Financial delay estimation complete."
+    }
+    mock_tradeoff.return_value = {
+        "decision": "continue",
+        "reasoning": "Work continues because cost is low and no safety stops are triggered.",
+        "rejected_alternative": "halt",
+        "rejected_because": "halting is not economically justified."
+    }
+
+    # 1x1 white pixel png base64
+    fake_png_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    
+    payload = {
+        "event_text": "Sitemap uploaded for Crane lifting safety.",
+        "attachment": {
+            "filename": "site_map_div_a.png",
+            "content_type": "image/png",
+            "data": fake_png_base64
+        }
+    }
+
+    response = client.post("/api/events", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert "attachment" in data
+    assert data["attachment"]["filename"] == "site_map_div_a.png"
+    assert data["attachment"]["content_type"] == "image/png"
+    assert data["attachment"]["url"].startswith("/uploads/")
+
+    # Check that file exists on disk
+    current_dir = os.path.dirname(os.path.abspath(backend.routes.events.__file__))
+    uploads_dir = os.path.join(os.path.dirname(current_dir), "uploads")
+    unique_filename = data["attachment"]["url"].split("/")[-1]
+    saved_file_path = os.path.join(uploads_dir, unique_filename)
+    assert os.path.exists(saved_file_path)
+
+    # Clean up test file
+    try:
+        os.remove(saved_file_path)
+    except OSError:
+        pass
+
+
+def test_pipeline_attachment_invalid_type():
+    payload = {
+        "event_text": "Testing invalid document extension",
+        "attachment": {
+            "filename": "malicious.exe",
+            "content_type": "application/x-msdownload",
+            "data": "SGVsbG8="
+        }
+    }
+    response = client.post("/api/events", json=payload)
+    assert response.status_code == 400
+    assert "Unsupported file type" in response.json()["detail"]
+
+
+def test_pipeline_attachment_oversized():
+    # Construct base64 payload larger than 5MB
+    large_data = "A" * (8 * 1024 * 1024)
+    payload = {
+        "event_text": "Testing oversized file size",
+        "attachment": {
+            "filename": "huge.pdf",
+            "content_type": "application/pdf",
+            "data": large_data
+        }
+    }
+    response = client.post("/api/events", json=payload)
+    assert response.status_code == 400
+    assert "exceeds" in response.json()["detail"]
