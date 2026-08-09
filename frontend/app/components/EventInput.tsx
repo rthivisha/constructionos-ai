@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
 import { api } from '../lib/api';
 import ReasoningTrace from './ReasoningTrace';
-import TradeoffCard from './TradeoffCard';
 
 export default function EventInput() {
   const [eventText, setEventText] = useState('');
@@ -127,24 +126,14 @@ export default function EventInput() {
       {/* pipeline results */}
       {result && (
         <div className="space-y-8 animate-fadeIn">
-          {/* Main tradeoff decision card */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">
-              Final Decision & Reconciliation
-            </h3>
-            <TradeoffCard 
-              data={result.tradeoff_reconciliation} 
-              financialStatus={result.financial_assessment?.status} 
-            />
-          </div>
-
-          {/* Reasoning trace cards */}
-          <div className="space-y-2">
-            <h3 className="text-xs font-bold text-slate-500 uppercase tracking-widest pl-1">
-              Pipeline Execution Trace (Multi-Agent)
-            </h3>
-            <ReasoningTrace data={result} />
-          </div>
+          <ReasoningTrace 
+            data={result} 
+            rawText={eventText} 
+            onReset={() => {
+              setResult(null);
+              setEventText('');
+            }} 
+          />
         </div>
       )}
     </div>
