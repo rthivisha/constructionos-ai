@@ -56,3 +56,52 @@ ConstructionOS/
 │       └── utils.ts              # Tailwind class merge helper (cn)
 ├── package.json
 └── README.md
+
+
+✅ Quick Start
+
+You need two terminals running simultaneously.
+
+#Terminal 1 — Backend:
+
+cd backend
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+uvicorn app.main:app --reload --port 8000
+
+#Terminal 2 — Frontend
+cd frontend
+npm install
+npm run dev
+
+Then open:
+
+http://localhost:3000
+
+
+
+┌─────────────────────────┐
+                               │ Raw Site Event Request  │
+                               └────────────┬────────────┘
+                                            │ (POST /api/run-pipeline)
+                                            ▼
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ FastAPI Backend Engine                                                                 │
+│                                                                                        │
+│   ┌──────────────────────┐      ┌──────────────────────┐      ┌────────────────────┐   │
+│   │ Stage 1: Observation │ ───► │ Stage 2: Safety      │ ───► │ Stage 3: Finance   │   │
+│   │ Agent (Task Match)   │      │ Agent (BOCW Rules)   │      │ Agent (Cost Delay) │   │
+│   └──────────────────────┘      └──────────────────────┘      └─────────┬──────────┘   │
+│                                                                         │              │
+│                                                                         ▼              │
+│                                                         ┌──────────────────────────┐   │
+│                                                         │ Stage 4: Resolution      │   │
+│                                                         │ Agent (Directives/Memos) │   │
+│                                                         └──────────────────────────┘   │
+└───────────────────────────────────────────┬────────────────────────────────────────────┘
+                                            │
+                                            ▼ (JSON Response)
+┌────────────────────────────────────────────────────────────────────────────────────────┐
+│ Next.js Frontend (4-Stage Interactive Stepper Trace)                                   │
+└────────────────────────────────────────────────────────────────────────────────────────┘
