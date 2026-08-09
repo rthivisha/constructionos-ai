@@ -120,285 +120,290 @@ export default function ReasoningTrace({ data }: ReasoningTraceProps) {
   const isFinanceOk = financial_assessment.status === "success";
 
   return (
-    <div className="grid grid-cols-1 gap-5 lg:grid-cols-3">
-      {/* ── OBSERVE CARD ── */}
-      <Card>
-        <div className="flex items-start justify-between gap-3 pb-4 mb-4 border-b border-white/6">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 1</p>
-            <h3 className="text-base font-semibold text-slate-100">Observation</h3>
-          </div>
-          <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-700/40 shrink-0">
-            <Activity className="w-4 h-4 text-slate-400" />
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div>
-            <SectionLabel>Event Category</SectionLabel>
-            <p className="text-base font-semibold text-slate-100 capitalize mt-1">
-              {observation.event_type ? observation.event_type.replace(/_/g, " ") : <span className="text-slate-500 italic">Unknown</span>}
-            </p>
-          </div>
-
-          <div className="grid grid-cols-2 gap-4">
+    <div className="space-y-5">
+      {/* Grid for Observation & Safety */}
+      <div className="grid grid-cols-1 md:grid-cols-2 gap-5 items-stretch">
+        {/* ── OBSERVE CARD ── */}
+        <Card className="h-full">
+          <div className="flex items-start justify-between gap-3 pb-4 mb-4 border-b border-white/6">
             <div>
-              <SectionLabel>Matched Task</SectionLabel>
-              <p className={cn("text-sm font-mono font-semibold mt-1", observation.task_id ? "text-slate-200" : "text-slate-500 italic")}>
-                {observation.task_id || (observation.task_not_matched ? "No Match" : "N/A")}
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 1</p>
+              <h3 className="text-base font-semibold text-slate-100">Observation</h3>
+            </div>
+            <div className="flex items-center justify-center w-9 h-9 rounded-xl bg-slate-700/40 shrink-0">
+              <Activity className="w-4 h-4 text-slate-400" />
+            </div>
+          </div>
+
+          <div className="space-y-4">
+            <div>
+              <SectionLabel>Event Category</SectionLabel>
+              <p className="text-base font-semibold text-slate-100 capitalize mt-1">
+                {observation.event_type ? observation.event_type.replace(/_/g, " ") : <span className="text-slate-500 italic">Unknown</span>}
               </p>
             </div>
+
+            <div className="grid grid-cols-2 gap-4">
+              <div>
+                <SectionLabel>Matched Task</SectionLabel>
+                <p className={cn("text-sm font-mono font-semibold mt-1", observation.task_id ? "text-slate-200" : "text-slate-500 italic")}>
+                  {observation.task_id || (observation.task_not_matched ? "No Match" : "N/A")}
+                </p>
+              </div>
+              <div>
+                <SectionLabel>Severity</SectionLabel>
+                <div className="mt-1">
+                  <SeverityBar value={observation.severity ?? 0} />
+                </div>
+              </div>
+            </div>
+
             <div>
-              <SectionLabel>Severity</SectionLabel>
+              <SectionLabel>Status</SectionLabel>
               <div className="mt-1">
-                <SeverityBar value={observation.severity ?? 0} />
+                {observation.parse_error ? (
+                  <Badge variant="halt"><XCircle className="w-3 h-3 mr-1" />Parse Error</Badge>
+                ) : observation.task_not_matched ? (
+                  <Badge variant="warn"><AlertTriangle className="w-3 h-3 mr-1" />Unmatched Task</Badge>
+                ) : (
+                  <Badge variant="ok"><CheckCircle2 className="w-3 h-3 mr-1" />Valid Match</Badge>
+                )}
               </div>
             </div>
           </div>
+        </Card>
 
-          <div>
-            <SectionLabel>Status</SectionLabel>
-            <div className="mt-1">
-              {observation.parse_error ? (
-                <Badge variant="halt"><XCircle className="w-3 h-3 mr-1" />Parse Error</Badge>
-              ) : observation.task_not_matched ? (
-                <Badge variant="warn"><AlertTriangle className="w-3 h-3 mr-1" />Unmatched Task</Badge>
-              ) : (
-                <Badge variant="ok"><CheckCircle2 className="w-3 h-3 mr-1" />Valid Match</Badge>
-              )}
+        {/* ── SAFETY CARD ── */}
+        <Card className="h-full" glow={isHardStop ? "halt" : "none"}>
+          <div className="flex items-start justify-between gap-3 pb-4 mb-4 border-b border-white/6">
+            <div>
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 2</p>
+              <h3 className="text-base font-semibold text-slate-100">Safety & Compliance</h3>
+            </div>
+            <div className={cn("flex items-center justify-center w-9 h-9 rounded-xl shrink-0",
+              isHardStop ? "bg-red-500/20" : "bg-emerald-500/10"
+            )}>
+              {isHardStop
+                ? <ShieldAlert className="w-4 h-4 text-red-400" />
+                : <ShieldCheck className="w-4 h-4 text-emerald-400" />}
             </div>
           </div>
-        </div>
-      </Card>
 
-      {/* ── SAFETY CARD ── */}
-      <Card glow={isHardStop ? "halt" : "none"}>
-        <div className="flex items-start justify-between gap-3 pb-4 mb-4 border-b border-white/6">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 2</p>
-            <h3 className="text-base font-semibold text-slate-100">Safety & Compliance</h3>
-          </div>
-          <div className={cn("flex items-center justify-center w-9 h-9 rounded-xl shrink-0",
-            isHardStop ? "bg-red-500/20" : "bg-emerald-500/10"
-          )}>
-            {isHardStop
-              ? <ShieldAlert className="w-4 h-4 text-red-400" />
-              : <ShieldCheck className="w-4 h-4 text-emerald-400" />}
-          </div>
-        </div>
+          <div className="space-y-4">
+            <div className="flex items-center justify-between">
+              <SectionLabel>Hard Stop</SectionLabel>
+              {safety_assessment.status === "unavailable"
+                ? <Badge variant="halt">UNAVAILABLE</Badge>
+                : isHardStop
+                  ? <Badge variant="halt"><span className="mr-1.5 inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />HALT TRIGGERED</Badge>
+                  : <Badge variant="ok">NONE ACTIVE</Badge>
+              }
+            </div>
 
-        <div className="space-y-4">
-          <div className="flex items-center justify-between">
-            <SectionLabel>Hard Stop</SectionLabel>
-            {safety_assessment.status === "unavailable"
-              ? <Badge variant="halt">UNAVAILABLE</Badge>
-              : isHardStop
-                ? <Badge variant="halt"><span className="mr-1.5 inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />HALT TRIGGERED</Badge>
-                : <Badge variant="ok">NONE ACTIVE</Badge>
-            }
-          </div>
+            {safety_assessment.triggered_rules?.length > 0 ? (
+              <div>
+                <SectionLabel>Triggered Regulations</SectionLabel>
+                <div className="mt-1.5 space-y-2">
+                  {safety_assessment.triggered_rules.map((rule, idx) => (
+                    <div key={idx} className="rounded-lg bg-red-500/8 border border-red-500/20 p-3">
+                      <span className="font-mono text-xs font-bold text-red-400 block mb-0.5">{rule.code}</span>
+                      <span className="text-xs text-slate-400 leading-relaxed">{rule.description}</span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ) : (
+              <div>
+                <SectionLabel>Triggered Regulations</SectionLabel>
+                <p className="mt-1 text-sm text-slate-500 italic">No regulatory violations identified.</p>
+              </div>
+            )}
 
-          {safety_assessment.triggered_rules?.length > 0 ? (
+            {/* ── Three structured halt explanation sections ── */}
+            <div className="space-y-3">
+              {/* Plain Reason */}
+              {safety_assessment.plain_reason && (
+                <div className="rounded-xl bg-white/[0.02] border border-white/6 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Why Operations Stopped</p>
+                  <p className="text-sm text-slate-300 leading-relaxed">{safety_assessment.plain_reason}</p>
+                </div>
+              )}
+
+              {/* Override Risk — only shown when hard stop is active */}
+              {isHardStop && safety_assessment.override_risk && (
+                <div className="rounded-xl bg-red-500/5 border border-red-500/15 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-1">Risk if Override Attempted</p>
+                  <p className="text-sm text-red-300/80 leading-relaxed">{safety_assessment.override_risk}</p>
+                </div>
+              )}
+
+              {/* Exception Mitigation — only shown when hard stop is active */}
+              {isHardStop && safety_assessment.exception_mitigation && (
+                <div className="rounded-xl bg-orange-500/5 border border-orange-500/15 p-3">
+                  <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400 mb-1">Emergency Exception Steps</p>
+                  <p className="text-[10px] font-semibold text-orange-500/70 mb-1.5">⚠ These steps do not constitute regulatory compliance</p>
+                  <p className="text-sm text-slate-300/80 leading-relaxed">{safety_assessment.exception_mitigation}</p>
+                </div>
+              )}
+            </div>
+
+            {safety_assessment.advisory_considerations && (
+              <div className="pt-3 border-t border-white/6 space-y-2">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500">
+                  AI Advisory Considerations
+                </p>
+                <div className="rounded-xl bg-amber-500/5 border border-amber-500/15 p-3 text-xs text-slate-300 whitespace-pre-line leading-relaxed">
+                  {safety_assessment.advisory_considerations}
+                </div>
+                {safety_assessment.advisory_disclaimer && (
+                  <p className="text-[10px] text-slate-500 italic leading-relaxed">
+                    {safety_assessment.advisory_disclaimer}
+                  </p>
+                )}
+              </div>
+            )}
+          </div>
+        </Card>
+      </div>
+
+      {/* ── FINANCE CARD ── */}
+      <div className="w-full">
+        <Card glow={isFinanceOk ? "ok" : "none"}>
+          <div className="flex items-start justify-between gap-3 pb-4 mb-4 border-b border-white/6">
             <div>
-              <SectionLabel>Triggered Regulations</SectionLabel>
-              <div className="mt-1.5 space-y-2">
-                {safety_assessment.triggered_rules.map((rule, idx) => (
-                  <div key={idx} className="rounded-lg bg-red-500/8 border border-red-500/20 p-3">
-                    <span className="font-mono text-xs font-bold text-red-400 block mb-0.5">{rule.code}</span>
-                    <span className="text-xs text-slate-400 leading-relaxed">{rule.description}</span>
-                  </div>
-                ))}
+              <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 3</p>
+              <h3 className="text-base font-semibold text-slate-100">Cost & Schedule</h3>
+            </div>
+            <div className={cn("flex items-center justify-center w-9 h-9 rounded-xl shrink-0",
+              isFinanceOk ? "bg-sky-500/20" : "bg-white/5"
+            )}>
+              <DollarSign className={cn("w-4 h-4", isFinanceOk ? "text-sky-400" : "text-slate-500")} />
+            </div>
+          </div>
+
+          {!isFinanceOk ? (
+            <div className="flex flex-col items-center justify-center py-8 text-center gap-3">
+              <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center">
+                <DollarSign className="w-6 h-6 text-slate-600" />
+              </div>
+              <div>
+                <Badge variant="muted" >
+                  {financial_assessment.status === "insufficient_data" ? "INSUFFICIENT DATA" : "UNAVAILABLE"}
+                </Badge>
+                <p className="mt-2 text-xs text-slate-500 leading-relaxed max-w-[220px]">
+                  {financial_assessment.summary || "Financial exposure could not be calculated due to unmatched task or missing data."}
+                </p>
               </div>
             </div>
           ) : (
-            <div>
-              <SectionLabel>Triggered Regulations</SectionLabel>
-              <p className="mt-1 text-sm text-slate-500 italic">No regulatory violations identified.</p>
+            <div className="space-y-4">
+              <div className="grid grid-cols-2 gap-3">
+                <div className="rounded-xl bg-white/[0.03] border border-white/6 p-3">
+                  <SectionLabel>Delay Used</SectionLabel>
+                  <div className="flex items-baseline gap-1 mt-1">
+                    <span className="text-2xl font-black text-slate-100 tabular-nums">{financial_assessment.delay_days_used ?? 0}</span>
+                    <span className="text-xs text-slate-500">days</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                    {financial_assessment.delay_source === "extracted_from_text"
+                      ? "Number of days explicitly stated in the event report"
+                      : "Estimated from event severity — no explicit delay in report"}
+                  </p>
+                </div>
+                <div className="rounded-xl bg-white/[0.03] border border-white/6 p-3">
+                  <SectionLabel>Project Impact</SectionLabel>
+                  <div className="flex items-baseline gap-1 mt-1">
+                    <span className="text-2xl font-black text-slate-100 tabular-nums">
+                      +{financial_assessment.cpm_result?.project_delay ?? 0}
+                    </span>
+                    <span className="text-xs text-slate-500">days</span>
+                  </div>
+                  <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                    {financial_assessment.cpm_result?.critical_path
+                      ? <span className="font-bold text-amber-500">On critical path — every day added pushes the project end date</span>
+                      : "Off critical path — project end date unchanged by this task alone"}
+                  </p>
+                </div>
+              </div>
+
+              <div className="space-y-4 pt-2">
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* ─ BLOCK 1: Halted Task Only ─ */}
+                  <div className="rounded-xl bg-white/[0.02] border border-white/6 p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Halted Task Only</span>
+                      <span className="text-[9px] bg-slate-500/10 text-slate-400 px-2 py-0.5 rounded-full border border-white/5 uppercase font-medium">Local Standby</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1 mb-2 leading-relaxed">Direct standby labor + local contractor penalties on this task alone</p>
+                    <p className="text-2xl font-black text-amber-400 tabular-nums">
+                      ₹{financial_assessment.cost_breakdown?.halted_task_total?.toLocaleString("en-IN") ?? "0"}
+                    </p>
+                    
+                    {financial_assessment.cost_breakdown && (
+                      <div className="mt-3 space-y-2 text-[10px] text-slate-400 border-t border-white/5 pt-2">
+                        <div className="flex justify-between">
+                          <span>Standby Labor:</span>
+                          <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.idle_labour.amount.toLocaleString("en-IN")}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Equip. Extension:</span>
+                          <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.equipment_extension.amount.toLocaleString("en-IN")}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Halt Penalty:</span>
+                          <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.delay_penalty.amount.toLocaleString("en-IN")}</span>
+                        </div>
+                        {financial_assessment.cost_breakdown.equipment_extension.warning && (
+                          <p className="text-[9px] text-amber-500 leading-snug bg-amber-500/5 border border-amber-500/10 p-1.5 rounded-md mt-1.5">
+                            ⚠ {financial_assessment.cost_breakdown.equipment_extension.warning}
+                          </p>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* ─ BLOCK 2: Full Project Impact ─ */}
+                  <div className="rounded-xl bg-white/[0.02] border border-white/6 p-4">
+                    <div className="flex items-center justify-between">
+                      <span className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Full Project Impact</span>
+                      <span className="text-[9px] bg-sky-500/10 text-sky-400 px-2 py-0.5 rounded-full border border-white/5 uppercase font-medium">Cascaded</span>
+                    </div>
+                    <p className="text-[10px] text-slate-500 mt-1 mb-2 leading-relaxed">Combined daily operating costs + delay penalties across all shifted critical path tasks</p>
+                    <p className="text-2xl font-black text-sky-400 tabular-nums">
+                      ₹{financial_assessment.cpm_result?.total_financial_exposure?.toLocaleString("en-IN") ?? "0"}
+                    </p>
+                    
+                    {financial_assessment.cpm_result?.breakdown && (
+                      <div className="mt-3 space-y-2 text-[10px] text-slate-400 border-t border-white/5 pt-2">
+                        <div className="flex justify-between">
+                          <span>Daily operating cost overhead:</span>
+                          <span className="font-mono text-slate-300">₹{financial_assessment.cpm_result.breakdown.operating_cost_exposure.toLocaleString("en-IN")}</span>
+                        </div>
+                        <div className="flex justify-between">
+                          <span>Downstream delay penalty:</span>
+                          <span className="font-mono text-slate-300">₹{financial_assessment.cpm_result.breakdown.penalty_exposure.toLocaleString("en-IN")}</span>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                </div>
+                
+                <div className="flex justify-between items-center text-[10px] text-slate-500 bg-white/[0.01] px-3 py-1.5 rounded-lg border border-white/5">
+                  <span>Calculation ID: <span className="font-mono font-medium text-slate-400">{financial_assessment.calculation_id}</span></span>
+                  <span>Cost Coverage: <span className="font-mono font-medium text-slate-400">{financial_assessment.cost_coverage}</span></span>
+                </div>
+              </div>
+
+              <div>
+                <SectionLabel>Financial Brief</SectionLabel>
+                <p className="mt-1 text-sm text-slate-300 leading-relaxed bg-white/[0.02] rounded-xl p-3 border border-white/6">
+                  {financial_assessment.summary}
+                </p>
+              </div>
             </div>
           )}
-
-          {/* ── Three structured halt explanation sections ── */}
-          <div className="space-y-3">
-            {/* Plain Reason */}
-            {safety_assessment.plain_reason && (
-              <div className="rounded-xl bg-white/[0.02] border border-white/6 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Why Operations Stopped</p>
-                <p className="text-sm text-slate-300 leading-relaxed">{safety_assessment.plain_reason}</p>
-              </div>
-            )}
-
-            {/* Override Risk — only shown when hard stop is active */}
-            {isHardStop && safety_assessment.override_risk && (
-              <div className="rounded-xl bg-red-500/5 border border-red-500/15 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-1">Risk if Override Attempted</p>
-                <p className="text-sm text-red-300/80 leading-relaxed">{safety_assessment.override_risk}</p>
-              </div>
-            )}
-
-            {/* Exception Mitigation — only shown when hard stop is active */}
-            {isHardStop && safety_assessment.exception_mitigation && (
-              <div className="rounded-xl bg-orange-500/5 border border-orange-500/15 p-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400 mb-1">Emergency Exception Steps</p>
-                <p className="text-[10px] font-semibold text-orange-500/70 mb-1.5">⚠ These steps do not constitute regulatory compliance</p>
-                <p className="text-sm text-slate-300/80 leading-relaxed">{safety_assessment.exception_mitigation}</p>
-              </div>
-            )}
-          </div>
-
-          {safety_assessment.advisory_considerations && (
-            <div className="pt-3 border-t border-white/6 space-y-2">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-amber-500">
-                AI Advisory Considerations
-              </p>
-              <div className="rounded-xl bg-amber-500/5 border border-amber-500/15 p-3 text-xs text-slate-300 whitespace-pre-line leading-relaxed">
-                {safety_assessment.advisory_considerations}
-              </div>
-              {safety_assessment.advisory_disclaimer && (
-                <p className="text-[10px] text-slate-500 italic leading-relaxed">
-                  {safety_assessment.advisory_disclaimer}
-                </p>
-              )}
-            </div>
-          )}
-        </div>
-      </Card>
-
-      {/* ── FINANCE CARD ── */}
-      <Card glow={isFinanceOk ? "ok" : "none"}>
-        <div className="flex items-start justify-between gap-3 pb-4 mb-4 border-b border-white/6">
-          <div>
-            <p className="text-[11px] font-bold uppercase tracking-widest text-slate-500 mb-0.5">Stage 3</p>
-            <h3 className="text-base font-semibold text-slate-100">Cost & Schedule</h3>
-          </div>
-          <div className={cn("flex items-center justify-center w-9 h-9 rounded-xl shrink-0",
-            isFinanceOk ? "bg-sky-500/20" : "bg-white/5"
-          )}>
-            <DollarSign className={cn("w-4 h-4", isFinanceOk ? "text-sky-400" : "text-slate-500")} />
-          </div>
-        </div>
-
-        {!isFinanceOk ? (
-          <div className="flex flex-col items-center justify-center py-8 text-center gap-3">
-            <div className="w-12 h-12 rounded-2xl bg-white/5 flex items-center justify-center">
-              <DollarSign className="w-6 h-6 text-slate-600" />
-            </div>
-            <div>
-              <Badge variant="muted" >
-                {financial_assessment.status === "insufficient_data" ? "INSUFFICIENT DATA" : "UNAVAILABLE"}
-              </Badge>
-              <p className="mt-2 text-xs text-slate-500 leading-relaxed max-w-[220px]">
-                {financial_assessment.summary || "Financial exposure could not be calculated due to unmatched task or missing data."}
-              </p>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="rounded-xl bg-white/[0.03] border border-white/6 p-3">
-                <SectionLabel>Delay Used</SectionLabel>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-2xl font-black text-slate-100 tabular-nums">{financial_assessment.delay_days_used ?? 0}</span>
-                  <span className="text-xs text-slate-500">days</span>
-                </div>
-                <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                  {financial_assessment.delay_source === "extracted_from_text"
-                    ? "Number of days explicitly stated in the event report"
-                    : "Estimated from event severity — no explicit delay in report"}
-                </p>
-              </div>
-              <div className="rounded-xl bg-white/[0.03] border border-white/6 p-3">
-                <SectionLabel>Project Impact</SectionLabel>
-                <div className="flex items-baseline gap-1 mt-1">
-                  <span className="text-2xl font-black text-slate-100 tabular-nums">
-                    +{financial_assessment.cpm_result?.project_delay ?? 0}
-                  </span>
-                  <span className="text-xs text-slate-500">days</span>
-                </div>
-                <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
-                  {financial_assessment.cpm_result?.critical_path
-                    ? <span className="font-bold text-amber-500">On critical path — every day added pushes the project end date</span>
-                    : "Off critical path — project end date unchanged by this task alone"}
-                </p>
-              </div>
-            </div>
-
-            <div className="space-y-4 pt-2">
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                {/* ─ BLOCK 1: Halted Task Only ─ */}
-                <div className="rounded-xl bg-white/[0.02] border border-white/6 p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-slate-400">Halted Task Only</span>
-                    <span className="text-[9px] bg-slate-500/10 text-slate-400 px-2 py-0.5 rounded-full border border-white/5 uppercase font-medium">Local Standby</span>
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-1 mb-2 leading-relaxed">Direct standby labor + local contractor penalties on this task alone</p>
-                  <p className="text-2xl font-black text-amber-400 tabular-nums">
-                    ₹{financial_assessment.cost_breakdown?.halted_task_total?.toLocaleString("en-IN") ?? "0"}
-                  </p>
-                  
-                  {financial_assessment.cost_breakdown && (
-                    <div className="mt-3 space-y-2 text-[10px] text-slate-400 border-t border-white/5 pt-2">
-                      <div className="flex justify-between">
-                        <span>Standby Labor:</span>
-                        <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.idle_labour.amount.toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Equip. Extension:</span>
-                        <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.equipment_extension.amount.toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Halt Penalty:</span>
-                        <span className="font-mono text-slate-300">₹{financial_assessment.cost_breakdown.delay_penalty.amount.toLocaleString("en-IN")}</span>
-                      </div>
-                      {financial_assessment.cost_breakdown.equipment_extension.warning && (
-                        <p className="text-[9px] text-amber-500 leading-snug bg-amber-500/5 border border-amber-500/10 p-1.5 rounded-md mt-1.5">
-                          ⚠ {financial_assessment.cost_breakdown.equipment_extension.warning}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
-
-                {/* ─ BLOCK 2: Full Project Impact ─ */}
-                <div className="rounded-xl bg-white/[0.02] border border-white/6 p-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[10px] font-bold uppercase tracking-widest text-sky-400">Full Project Impact</span>
-                    <span className="text-[9px] bg-sky-500/10 text-sky-400 px-2 py-0.5 rounded-full border border-white/5 uppercase font-medium">Cascaded</span>
-                  </div>
-                  <p className="text-[10px] text-slate-500 mt-1 mb-2 leading-relaxed">Combined daily operating costs + delay penalties across all shifted critical path tasks</p>
-                  <p className="text-2xl font-black text-sky-400 tabular-nums">
-                    ₹{financial_assessment.cpm_result?.total_financial_exposure?.toLocaleString("en-IN") ?? "0"}
-                  </p>
-                  
-                  {financial_assessment.cpm_result?.breakdown && (
-                    <div className="mt-3 space-y-2 text-[10px] text-slate-400 border-t border-white/5 pt-2">
-                      <div className="flex justify-between">
-                        <span>Daily operating cost overhead:</span>
-                        <span className="font-mono text-slate-300">₹{financial_assessment.cpm_result.breakdown.operating_cost_exposure.toLocaleString("en-IN")}</span>
-                      </div>
-                      <div className="flex justify-between">
-                        <span>Downstream delay penalty:</span>
-                        <span className="font-mono text-slate-300">₹{financial_assessment.cpm_result.breakdown.penalty_exposure.toLocaleString("en-IN")}</span>
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </div>
-              
-              <div className="flex justify-between items-center text-[10px] text-slate-500 bg-white/[0.01] px-3 py-1.5 rounded-lg border border-white/5">
-                <span>Calculation ID: <span className="font-mono font-medium text-slate-400">{financial_assessment.calculation_id}</span></span>
-                <span>Cost Coverage: <span className="font-mono font-medium text-slate-400">{financial_assessment.cost_coverage}</span></span>
-              </div>
-            </div>
-
-            <div>
-              <SectionLabel>Financial Brief</SectionLabel>
-              <p className="mt-1 text-sm text-slate-300 leading-relaxed bg-white/[0.02] rounded-xl p-3 border border-white/6">
-                {financial_assessment.summary}
-              </p>
-            </div>
-          </div>
-        )}
-      </Card>
+        </Card>
+      </div>
     </div>
   );
 }
