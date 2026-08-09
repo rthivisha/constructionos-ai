@@ -1,4 +1,4 @@
-﻿"""
+"""
 Tests for propose_reschedule() and POST /api/schedule/apply-reschedule.
 
 Required coverage:
@@ -269,3 +269,176 @@ def test_apply_reschedule_persists_correctly():
     # Confirm DB was actually written
     after_duration = _get_task_duration("T-105")
     assert after_duration == before_duration + 2
+
+
+# ─── P3 Tests: Reschedule-to-deadline ────────────────────────────────────────
+
+def test_deadline_fully_recovered_when_slack_covers_delay():
+    """
+    When available same-contractor slack fully covers the delay,
+    post_reallocation_duration == baseline_project_duration and
+    deadline_status must be "fully_recovered". remaining_delay_days == 0.
+
+    Setup: Add T-105 (DIV-A, L&T, duration=3, non-critical) with slack >> delay.
+    Baseline: 33 days. Delay T-101 by 2 days → new duration 35.
+    T-105 slack in delayed schedule = 35 - 3 = 32 (>> 2).
+    After absorbing 2 days: post_reallocation_duration = 35 - 2 = 33 = baseline.
+    → fully_recovered
+    """
+    _seed_extra_tasks([{
+        "task_id": "T-105",
+        "division_id": "DIV-A",
+        "task_name": "Site Fencing",
+        "duration": 3,
+        "is_critical_path": 0,
+        "dependencies": "",
+    }])
+
+    cpm_result = recalculate_schedule("T-101", 2)
+    proposal = propose_reschedule(cpm_result)
+
+    assert proposal["deadline_status"] == "fully_recovered", (
+        f"Expected fully_recovered, got {proposal['deadline_status']}. "
+        f"Detail: {proposal['calculation_detail']}"
+    )
+    assert proposal["remaining_delay_days"] == 0
+    assert proposal["estimated_remaining_penalty"] == 0.0
+    assert proposal["post_reallocation_duration"] == cpm_result["baseline_project_duration"]
+
+    # Confirm the math is in the calculation_detail
+    assert "FULLY RECOVERED" in proposal["calculation_detail"]
+    assert str(cpm_result["baseline_project_duration"]) in proposal["calculation_detail"]
+
+
+def test_deadline_partially_recovered_with_correct_remaining_figures():
+    """
+    When slack covers some but not all delay, deadline_status is "partially_recovered"
+    with correct remaining_delay_days and estimated_remaining_penalty.
+
+    Setup: Add T-105 (DIV-A, L&T, duration=3, non-critical) — only 1 day absorbed
+    by constraining T-105 slack to 1 via a dependency that forces an early late_finish.
+    Simpler approach: delay T-101 by 20 days (>> available slack).
+    Baseline 33 days → delayed 53 days. T-105 slack in delayed schedule ≈ 50 → absorbs 20?
+    Not right — 20 days delay on a root critical task makes T-105 slack also grow.
+
+    Better approach: seed two tasks.
+      T-105 (DIV-A, duration=3, no deps, non-critical) — large slack after delay.
+      T-106 (DIV-A, duration=1, depends on T-103, non-critical) — limited slack.
+    But because T-105 has essentially unlimited slack vs any delay on T-101,
+    we can only get partial recovery by capping available slack:
+    Delay T-101 by 50 days (hypothetical). T-105 slack in delayed = 83-3=80.
+    Absorbs all 50 → fully recovered. That doesn't work either.
+
+    The CORRECT way to force partial: halt a NON-critical task with no candidates
+    at all (cross-contractor only) → not_feasible.
+    For PARTIAL: introduce a small-slack candidate.
+    Add T-105 (DIV-A, duration=30, depends on T-101). Its slack in delayed schedule
+    is 0 if on critical path. Let it have is_critical_path=0 but duration 25.
+    Baseline: T-101(10)+T-102(15)+T-103(8)=33. T-105 depends on T-101, dur=25.
+    ES=10, EF=35>33 → it becomes critical? No, late finish = project duration.
+    LF=33, LS=33-25=8, but ES=10 > LS → negative slack → critical!
+    Use duration=20 instead. EF=10+20=30 ≤ 33. Slack = LF(33)-EF(30)=3.
+    Delay T-101 by 5 → delayed project = 38 days. T-105: ES=12, EF=32. LF=38. slack=6.
+    But 6 ≥ 5 → would fully recover. Use duration=22. Baseline EF=10+22=32, slack=1.
+    Delay T-101 by 5 → delayed project = 38. T-105 ES=12, EF=12+22=34. LF=38. slack=4.
+    Still ≥ 5? No, slack=4 < 5 → absorbs 4 days → partial! remaining=1.
+    Penalty: L&T penalty rate = 75000/day → estimated_remaining_penalty = 1 * 75000 = 75000.
+    """
+    _seed_extra_tasks([{
+        "task_id": "T-105",
+        "division_id": "DIV-A",       # L&T — same as T-101
+        "task_name": "Temporary Access Road",
+        "duration": 22,               # slack=1 in baseline, slack=4 in 5-day delay scenario
+        "is_critical_path": 0,
+        "dependencies": "T-101",      # depends on halted task
+    }])
+
+    cpm_result = recalculate_schedule("T-101", 5)
+    baseline_dur = cpm_result["baseline_project_duration"]   # 33
+    delayed_dur = cpm_result["new_project_duration"]         # 38
+
+    # Verify T-105 slack in delayed schedule
+    t105_delayed_slack = cpm_result["tasks"]["T-105"]["delayed"]["slack"]
+    assert t105_delayed_slack > 0, "T-105 must have positive slack in delayed schedule"
+    assert t105_delayed_slack < 5, (
+        f"T-105 slack ({t105_delayed_slack}) must be < 5 to force partial recovery"
+    )
+
+    proposal = propose_reschedule(cpm_result)
+
+    assert proposal["deadline_status"] == "partially_recovered", (
+        f"Expected partially_recovered, got {proposal['deadline_status']}. "
+        f"slack={t105_delayed_slack}, delay=5. Detail:\n{proposal['calculation_detail']}"
+    )
+
+    # net recovered = t105_delayed_slack (absorbed all available)
+    assert proposal["net_delay_reduction_days"] == t105_delayed_slack
+
+    # Remaining delay = 5 - absorbed
+    expected_remaining = 5 - t105_delayed_slack
+    assert proposal["remaining_delay_days"] == expected_remaining
+
+    # post_reallocation_duration = 38 - absorbed
+    expected_post = delayed_dur - t105_delayed_slack
+    assert proposal["post_reallocation_duration"] == expected_post
+    assert expected_post > baseline_dur  # partial, not full
+
+    # L&T penalty = 75000/day (from seed data)
+    expected_penalty = expected_remaining * 75000.0
+    assert proposal["estimated_remaining_penalty"] == expected_penalty, (
+        f"Penalty mismatch: expected {expected_penalty}, got {proposal['estimated_remaining_penalty']}"
+    )
+
+    # Math must appear in calculation_detail
+    assert "PARTIAL" in proposal["calculation_detail"]
+    assert str(expected_remaining) in proposal["calculation_detail"]
+
+
+def test_deadline_not_feasible_when_no_same_contractor_candidates():
+    """
+    When the only non-critical task is a different contractor, there are no
+    candidates at all. deadline_status must be "not_feasible", remaining_delay_days
+    equals the full project_delay, and estimated_remaining_penalty is computed
+    from the halted task's contractor penalty rate.
+
+    T-101 (L&T), T-104 (Afcons, non-critical). Halt T-101 for 3 days.
+    No L&T non-critical candidates → not_feasible.
+    remaining_delay_days = 3 (all of project_delay).
+    L&T penalty = 75000/day → estimated_remaining_penalty = 3 * 75000 = 225000.
+    """
+    # Default seed: only T-104 is non-critical, and it's Afcons (DIV-B).
+    cpm_result = recalculate_schedule("T-101", 3)
+
+    assert cpm_result["project_delay"] == 3
+
+    proposal = propose_reschedule(cpm_result)
+
+    assert proposal["feasible"] is False
+    assert proposal["deadline_status"] == "not_feasible"
+    assert proposal["remaining_delay_days"] == 3
+    assert proposal["net_delay_reduction_days"] == 0
+    assert proposal["proposed_reschedule"] == []
+
+    # Penalty must be from L&T's rate (75000/day), not hardcoded
+    expected_penalty = 3 * 75000.0
+    assert proposal["estimated_remaining_penalty"] == expected_penalty, (
+        f"Expected ₹{expected_penalty}, got ₹{proposal['estimated_remaining_penalty']}"
+    )
+
+    # "Deadline check" line must appear
+    assert "Deadline check" in proposal["calculation_detail"]
+
+
+def test_zero_delay_returns_fully_recovered():
+    """
+    A zero-delay event should immediately return fully_recovered with all zeroes.
+    This guards against the zero-delay early-return path returning wrong deadline fields.
+    """
+    cpm_result = recalculate_schedule("T-101", 0)
+    proposal = propose_reschedule(cpm_result)
+
+    assert proposal["deadline_status"] == "fully_recovered"
+    assert proposal["remaining_delay_days"] == 0
+    assert proposal["estimated_remaining_penalty"] == 0.0
+    assert proposal["net_delay_reduction_days"] == 0
+    assert proposal["feasible"] is False

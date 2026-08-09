@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import React from "react";
 import { cn } from "@/app/lib/utils";
 import { ShieldAlert, ShieldCheck, AlertTriangle, CheckCircle2, XCircle, Activity, DollarSign, Clock } from "lucide-react";
@@ -15,7 +15,9 @@ interface ReasoningTraceProps {
     safety_assessment: {
       hard_stop: boolean;
       triggered_rules: { code: string; description: string }[];
-      brief: string;
+      plain_reason: string;
+      override_risk?: string;
+      exception_mitigation?: string;
       advisory_considerations?: string;
       advisory_disclaimer?: string;
       fallback_mode_active: boolean;
@@ -204,11 +206,32 @@ export default function ReasoningTrace({ data }: ReasoningTraceProps) {
             </div>
           )}
 
-          <div>
-            <SectionLabel>Safety Brief</SectionLabel>
-            <p className="mt-1 text-sm text-slate-300 leading-relaxed bg-white/[0.02] rounded-xl p-3 border border-white/6">
-              {safety_assessment.brief}
-            </p>
+          {/* ── Three structured halt explanation sections ── */}
+          <div className="space-y-3">
+            {/* Plain Reason */}
+            {safety_assessment.plain_reason && (
+              <div className="rounded-xl bg-white/[0.02] border border-white/6 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-slate-500 mb-1">Why Operations Stopped</p>
+                <p className="text-sm text-slate-300 leading-relaxed">{safety_assessment.plain_reason}</p>
+              </div>
+            )}
+
+            {/* Override Risk — only shown when hard stop is active */}
+            {isHardStop && safety_assessment.override_risk && (
+              <div className="rounded-xl bg-red-500/5 border border-red-500/15 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-red-500 mb-1">Risk if Override Attempted</p>
+                <p className="text-sm text-red-300/80 leading-relaxed">{safety_assessment.override_risk}</p>
+              </div>
+            )}
+
+            {/* Exception Mitigation — only shown when hard stop is active */}
+            {isHardStop && safety_assessment.exception_mitigation && (
+              <div className="rounded-xl bg-orange-500/5 border border-orange-500/15 p-3">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-orange-400 mb-1">Emergency Exception Steps</p>
+                <p className="text-[10px] font-semibold text-orange-500/70 mb-1.5">⚠ These steps do not constitute regulatory compliance</p>
+                <p className="text-sm text-slate-300/80 leading-relaxed">{safety_assessment.exception_mitigation}</p>
+              </div>
+            )}
           </div>
 
           {safety_assessment.advisory_considerations && (
@@ -266,8 +289,10 @@ export default function ReasoningTrace({ data }: ReasoningTraceProps) {
                   <span className="text-2xl font-black text-slate-100 tabular-nums">{financial_assessment.delay_days_used ?? 0}</span>
                   <span className="text-xs text-slate-500">days</span>
                 </div>
-                <p className="text-[10px] text-slate-600 mt-0.5">
-                  {financial_assessment.delay_source === "extracted_from_text" ? "from report" : "severity fallback"}
+                <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                  {financial_assessment.delay_source === "extracted_from_text"
+                    ? "Number of days explicitly stated in the event report"
+                    : "Estimated from event severity — no explicit delay in report"}
                 </p>
               </div>
               <div className="rounded-xl bg-white/[0.03] border border-white/6 p-3">
@@ -278,17 +303,18 @@ export default function ReasoningTrace({ data }: ReasoningTraceProps) {
                   </span>
                   <span className="text-xs text-slate-500">days</span>
                 </div>
-                {financial_assessment.cpm_result?.critical_path ? (
-                  <p className="text-[10px] font-bold text-amber-500 mt-0.5">Critical Path</p>
-                ) : (
-                  <p className="text-[10px] text-slate-600 mt-0.5">Non-Critical</p>
-                )}
+                <p className="text-[10px] text-slate-500 mt-0.5 leading-snug">
+                  {financial_assessment.cpm_result?.critical_path
+                    ? <span className="font-bold text-amber-500">On critical path — every day added pushes the project end date</span>
+                    : "Off critical path — project end date unchanged by this task alone"}
+                </p>
               </div>
             </div>
 
             <div>
               <SectionLabel>Total INR Exposure</SectionLabel>
-              <p className="text-2xl font-black text-sky-400 mt-1 tabular-nums">
+              <p className="text-[10px] text-slate-500 mt-0.5 mb-1 leading-snug">Combined operating costs + contractual delay penalties over the halt period</p>
+              <p className="text-2xl font-black text-sky-400 tabular-nums">
                 ₹{financial_assessment.cpm_result?.total_financial_exposure?.toLocaleString("en-IN") ?? "0"}
               </p>
               {financial_assessment.cpm_result?.breakdown && (

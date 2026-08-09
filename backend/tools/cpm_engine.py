@@ -402,6 +402,8 @@ def propose_reschedule(cpm_result: Dict[str, Any]) -> Dict[str, Any]:
     - Derives delay reduction from the actual computed slack values in the
       backward pass (cpm_result["tasks"][tid]["delayed"]["slack"]), not a
       hardcoded constant.
+    - Compares post-reallocation project finish against baseline_project_duration
+      (the committed delivery deadline) and returns an honest deadline_status.
     - Returns a proposal only. Nothing is written to the database here.
 
     Args:
@@ -414,10 +416,17 @@ def propose_reschedule(cpm_result: Dict[str, Any]) -> Dict[str, Any]:
           - calculation_detail: str showing the slack arithmetic
           - feasible: bool — True if at least one day of delay can be recovered
           - halted_task_id: str, for reference
+          - deadline_status: "fully_recovered" | "partially_recovered" | "not_feasible"
+          - deadline_days (int): the baseline project duration used as deadline
+          - post_reallocation_duration (int): project duration after absorbing slack
+          - remaining_delay_days (int): unrecovered delay after reallocation (0 if fully recovered)
+          - estimated_remaining_penalty (float): penalty cost for unrecovered delay days
     """
     halted_task_id: str = cpm_result["halted_task_id"]
     delay_days: int = cpm_result["delay_days"]
     tasks_info: Dict[str, Dict] = cpm_result.get("tasks", {})
+    baseline_duration: int = cpm_result.get("baseline_project_duration", 0)
+    delayed_duration: int = cpm_result.get("new_project_duration", baseline_duration)
 
     if delay_days == 0:
         return {
@@ -426,12 +435,18 @@ def propose_reschedule(cpm_result: Dict[str, Any]) -> Dict[str, Any]:
             "net_delay_reduction_days": 0,
             "calculation_detail": "No delay — no reschedule needed.",
             "proposed_reschedule": [],
+            "deadline_status": "fully_recovered",
+            "deadline_days": baseline_duration,
+            "post_reallocation_duration": baseline_duration,
+            "remaining_delay_days": 0,
+            "estimated_remaining_penalty": 0.0,
         }
 
     # ── Resolve contractor for the halted task ──────────────────────────────
     state, _ = get_project_state()
     task_rows = {t["task_id"]: t for t in state.get("schedule_tasks", [])}
     division_map = {d["id"]: d for d in state.get("divisions", [])}
+    contractor_map = {c["name"]: c for c in state.get("contractors", [])}
 
     halted_row = task_rows.get(halted_task_id)
     if not halted_row:
@@ -441,6 +456,11 @@ def propose_reschedule(cpm_result: Dict[str, Any]) -> Dict[str, Any]:
             "net_delay_reduction_days": 0,
             "calculation_detail": f"Halted task '{halted_task_id}' not found — cannot propose reschedule.",
             "proposed_reschedule": [],
+            "deadline_status": "not_feasible",
+            "deadline_days": baseline_duration,
+            "post_reallocation_duration": delayed_duration,
+            "remaining_delay_days": delayed_duration - baseline_duration,
+            "estimated_remaining_penalty": 0.0,
         }
 
     halted_div = division_map.get(halted_row["division_id"], {})
@@ -484,9 +504,6 @@ def propose_reschedule(cpm_result: Dict[str, Any]) -> Dict[str, Any]:
     candidates.sort(key=lambda c: c["slack_available"], reverse=True)
 
     # ── Compute how many delay days can be absorbed ─────────────────────────
-    # We accumulate slack across candidates until we cover delay_days.
-    # Slack from multiple non-critical tasks is additive because they can
-    # each absorb part of the delay independently.
     remaining_to_cover = delay_days
     total_recovered = 0
     calc_lines = [f"Delay to absorb: {delay_days} day(s)"]
@@ -526,10 +543,49 @@ def propose_reschedule(cpm_result: Dict[str, Any]) -> Dict[str, Any]:
                 f"(insufficient slack within contractor '{halted_contractor}')"
             )
 
+    # ── Deadline comparison (P3) ─────────────────────────────────────────────
+    # baseline_project_duration is the committed delivery deadline (day 0 = project start).
+    # post_reallocation_duration = delayed_duration - days we absorbed via slack.
+    # We never report full recovery unless the math literally reaches baseline.
+    post_reallocation_duration: int = delayed_duration - total_recovered
+    remaining_delay_days: int = max(0, post_reallocation_duration - baseline_duration)
+
+    # Compute estimated penalty for remaining unrecovered delay days using the
+    # halted task's contractor penalty rate (the party responsible for the delay).
+    halted_contractor_data = contractor_map.get(halted_contractor, {})
+    penalty_rate_per_day: float = float(halted_contractor_data.get("daily_delay_penalty", 0.0))
+    estimated_remaining_penalty: float = remaining_delay_days * penalty_rate_per_day
+
+    if remaining_delay_days == 0:
+        deadline_status = "fully_recovered"
+        calc_lines.append(
+            f"\nDeadline check: post-reallocation finish = day {post_reallocation_duration} "
+            f"≤ deadline = day {baseline_duration} → FULLY RECOVERED"
+        )
+    elif total_recovered > 0:
+        deadline_status = "partially_recovered"
+        calc_lines.append(
+            f"\nDeadline check: post-reallocation finish = day {post_reallocation_duration} "
+            f"> deadline = day {baseline_duration} → PARTIAL: {remaining_delay_days}d still overdue "
+            f"(est. penalty ₹{estimated_remaining_penalty:,.0f} @ ₹{penalty_rate_per_day:,.0f}/day)"
+        )
+    else:
+        deadline_status = "not_feasible"
+        calc_lines.append(
+            f"\nDeadline check: no slack available — full {remaining_delay_days}d overrun remains "
+            f"(est. penalty ₹{estimated_remaining_penalty:,.0f})"
+        )
+
     return {
         "halted_task_id": halted_task_id,
         "feasible": total_recovered > 0,
         "net_delay_reduction_days": total_recovered,
         "calculation_detail": "\n".join(calc_lines),
         "proposed_reschedule": proposed,
+        "deadline_status": deadline_status,
+        "deadline_days": baseline_duration,
+        "post_reallocation_duration": post_reallocation_duration,
+        "remaining_delay_days": remaining_delay_days,
+        "estimated_remaining_penalty": estimated_remaining_penalty,
     }
+

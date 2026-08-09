@@ -79,7 +79,14 @@ def setup_test_db():
 def test_safety_agent_hard_stop(mock_genai):
     mock_client = MagicMock()
     mock_genai.return_value = mock_client
-    mock_client.models.generate_content.return_value = MockResponse("Scaffolding rules require height safety.")
+    # Now expects a JSON response with three structured fields
+    mock_client.models.generate_content.return_value = MockResponse(
+        json.dumps({
+            "plain_reason": "Scaffolding rules require height safety — operations halted.",
+            "override_risk": "Continuing under BOCW_SEC_40 risks fatal falls and prosecution.",
+            "exception_mitigation": "NOT COMPLIANCE — emergency exception steps only: (1) Safety officer sign-off. (2) Ensure harnesses present."
+        })
+    )
     
     observe_output = {
         "event_type": EventType.WORK_AT_HEIGHT.value,
@@ -94,7 +101,9 @@ def test_safety_agent_hard_stop(mock_genai):
     assert res["hard_stop"] is True
     assert len(res["triggered_rules"]) == 1
     assert res["triggered_rules"][0]["code"] == "BOCW_SEC_40"
-    assert "safety harness" in res["brief"].lower() or "scaffolding" in res["brief"].lower()
+    # Check the new structured fields instead of brief
+    assert "safety" in res["plain_reason"].lower() or "height" in res["plain_reason"].lower() or "halted" in res["plain_reason"].lower()
+    assert "BOCW_SEC_40" in res["override_risk"]
     assert res["parse_error"] is False
 
 @patch('backend.agents.safety_agent.genai.Client')
@@ -127,7 +136,8 @@ def test_safety_agent_parse_error_halt():
     res = assess_safety(observe_output)
     assert res["parse_error"] is True
     assert res["hard_stop"] is False
-    assert "observe agent failed" in res["brief"].lower()
+    # plain_reason replaces brief for parse_error path
+    assert "observe agent failed" in res["plain_reason"].lower()
 
 # --- FINANCE AGENT TESTS ---
 

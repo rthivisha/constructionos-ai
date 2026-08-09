@@ -20,37 +20,63 @@ _ADVISORY_DISCLAIMER = (
 # Mock brief template — interpolates actual hard_stop + triggered_rules values
 # at render time, preventing narrative/decision mismatches structurally.
 # ---------------------------------------------------------------------------
-def _mock_brief(
+def _mock_structured_explanation(
     event_type: str,
     severity: int,
     hard_stop: bool,
     triggered_rules: List[Dict[str, str]],
-) -> str:
+) -> Dict[str, str]:
     """
-    Generates a deterministic safety brief by interpolating real computed values
-    (hard_stop, triggered_rules, event_type, severity) into a template.
-    No canned per-scenario text — the template is the single source of truth.
+    Generates deterministic structured halt explanation by interpolating actual
+    hard_stop/triggered_rules values at render time. Three distinct fields:
+      - plain_reason: non-technical "why we stopped"
+      - override_risk: concrete consequences if ignored (references actual rule code)
+      - exception_mitigation: steps under emergency exception (NOT compliance)
+    No independently-authored canned text — templates are the single source of truth.
     """
-    stop_label = "HARD_STOP: TRUE (non-overridable halt)" if hard_stop else "HARD_STOP: FALSE (no halt required)"
     rules_text = (
-        ", ".join(f"{r['code']}" for r in triggered_rules)
-        if triggered_rules
-        else "none"
+        ", ".join(r['code'] for r in triggered_rules) if triggered_rules else "none"
     )
-    rules_detail = (
-        " ".join(f"[{r['code']}: {r['description']}]" for r in triggered_rules)
-        if triggered_rules
-        else "No regulatory rule triggered for this event category."
-    )
-    action = (
-        "All site operations in the affected zone must cease immediately pending inspection and regulatory clearance."
-        if hard_stop
-        else "Operations may continue under standard site precautions. Monitor the situation and escalate if conditions deteriorate."
-    )
-    return (
-        f"[MOCK] ConstructionOS Safety Assessment — Event: {event_type} | Severity: {severity}/10 | {stop_label} | "
-        f"Rules triggered: {rules_text}. {rules_detail} {action}"
-    )
+    first_rule_code = triggered_rules[0]['code'] if triggered_rules else "(no rule)"
+    first_rule_desc = triggered_rules[0]['description'] if triggered_rules else ""
+
+    if hard_stop:
+        plain_reason = (
+            f"[MOCK] This site event (category: {event_type}, severity {severity}/10) has triggered a mandatory "
+            f"work stoppage under regulation {first_rule_code}. Operations must halt because the conditions "
+            f"present an immediate risk that the regulation was specifically enacted to prevent."
+        )
+        override_risk = (
+            f"[MOCK] Continuing operations in violation of {first_rule_code} ({first_rule_desc}) carries the "
+            f"following concrete risks: personnel exposure to the regulated hazard without mandated controls; "
+            f"potential fatal or serious injury; regulatory prosecution of the site contractor and project owner; "
+            f"and automatic contract penalty clauses triggered by a documented non-compliance event."
+        )
+        exception_mitigation = (
+            f"[MOCK — NOT COMPLIANCE] If a site manager invokes emergency exception to continue under {first_rule_code}: "
+            f"(1) Obtain written sign-off from the senior safety officer on-site. "
+            f"(2) Reduce the active workforce to the minimum essential for the emergency task. "
+            f"(3) Ensure mandated PPE and safety controls are physically present even if incomplete. "
+            f"(4) Log the exception in the site safety diary with timestamp and reason. "
+            f"This does not constitute regulatory compliance and does not remove legal liability."
+        )
+    else:
+        plain_reason = (
+            f"[MOCK] This site event (category: {event_type}, severity {severity}/10) did not match any "
+            f"active regulatory rule trigger condition. No hard stop is required. Rules checked: {rules_text}."
+        )
+        override_risk = (
+            "[MOCK] No override context — hard stop was not triggered. Standard site precaution protocols apply."
+        )
+        exception_mitigation = (
+            "[MOCK] No exception mitigation required — operations may continue under normal site safety management."
+        )
+
+    return {
+        "plain_reason": plain_reason,
+        "override_risk": override_risk,
+        "exception_mitigation": exception_mitigation,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -99,7 +125,9 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
         return {
             "hard_stop": False,
             "triggered_rules": [],
-            "brief": "Safety assessment halted: Observe Agent failed to parse the event.",
+            "plain_reason": "Safety assessment halted: Observe Agent failed to parse the event.",
+            "override_risk": "",
+            "exception_mitigation": "",
             "advisory_considerations": "",
             "advisory_disclaimer": _ADVISORY_DISCLAIMER,
             "fallback_mode_active": False,
@@ -126,60 +154,68 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
     # WARNING: advisory_considerations must never influence hard_stop.
     hard_stop = len(triggered_rules) > 0
 
-    # --- MOCK MODE: skip all Gemini calls, use templated brief + canned advisories ---
+    # --- MOCK MODE: skip all Gemini calls, use templated structured explanation ---
     if use_mock_llm():
         logger.info("[MOCK MODE] Safety Agent running without Gemini API call.")
-        brief = _mock_brief(event_type, severity, hard_stop, triggered_rules)
+        explanation = _mock_structured_explanation(event_type, severity, hard_stop, triggered_rules)
         advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
         return {
             "hard_stop": hard_stop,
             "triggered_rules": triggered_rules,
-            "brief": brief,
+            "plain_reason": explanation["plain_reason"],
+            "override_risk": explanation["override_risk"],
+            "exception_mitigation": explanation["exception_mitigation"],
             "advisory_considerations": advisory_considerations,
             "advisory_disclaimer": _ADVISORY_DISCLAIMER,
             "fallback_mode_active": fallback_mode,
             "parse_error": False
         }
 
-    # 4. Generate explanation brief using Gemini (treating the decision as fixed facts)
+    # 4. Generate structured explanation using Gemini (decision treated as fixed facts)
     api_key = get_api_key()
+    rules_json = json.dumps(triggered_rules)
+    first_rule_code = triggered_rules[0]['code'] if triggered_rules else "(no rule triggered)"
+
     if not api_key:
-        logger.warning("GEMINI_API_KEY not configured. Safety Agent using offline fallback brief.")
-        brief = (
-            f"Safety evaluation complete. Hard stop: {hard_stop}. "
-            f"Triggered rules: {', '.join([r['code'] for r in triggered_rules]) if triggered_rules else 'none'}."
-        )
+        logger.warning("GEMINI_API_KEY not configured. Safety Agent using offline fallback explanation.")
+        fallback_expl = _mock_structured_explanation(event_type, severity, hard_stop, triggered_rules)
+        plain_reason = fallback_expl["plain_reason"]
+        override_risk = fallback_expl["override_risk"]
+        exception_mitigation = fallback_expl["exception_mitigation"]
     else:
         client = genai.Client(api_key=api_key)
-        
         prompt = f"""
 You are the Safety Agent for ConstructionOS AI.
-Your task is to draft a compliance assessment brief explaining a safety event evaluation.
+The safety decision below is ALREADY FIXED — do not re-evaluate it.
 
-The safety evaluation results are already decided as fixed facts:
-- HARD_STOP: {hard_stop} (if True, this is an absolute, non-overridable stop signal for operations)
-- Triggered Rules: {json.dumps(triggered_rules)}
+FIXED FACTS:
+- HARD_STOP: {hard_stop}
+- Triggered Regulations: {rules_json}
 - Event Category: {event_type}
 - Event Severity: {severity}/10
+- Primary matched rule: {first_rule_code}
 
-Raw Jobsite Report Context:
-"{raw_event_text or 'No raw text provided.'}"
+Raw Jobsite Report: "{raw_event_text or 'No raw text provided.'}"
 
-Please write a brief summary explaining these facts, emphasizing why a hard stop was or was not issued, and reference relevant regulatory norms (such as BOCW Act or Factories Act) as context.
-WARNING: Your narrative must be entirely consistent with the fixed facts above (HARD_STOP is {hard_stop}). Do not contradict or re-evaluate them. Keep it concise (under 120 words).
+Generate EXACTLY THREE fields as a JSON object with these keys:
+1. "plain_reason": One plain-English sentence explaining why operations must stop (or not). Non-technical. Must be consistent with HARD_STOP={hard_stop}.
+2. "override_risk": 2-3 sentences on concrete consequences if a site manager ignores this decision. MUST explicitly reference {first_rule_code} by name. Be specific — no generic safety language.
+3. "exception_mitigation": 3-4 concrete steps a site manager must take if they invoke an emergency exception to continue. Start with: "NOT COMPLIANCE — emergency exception steps only:"
+
+Return ONLY the JSON object, no other text.
 """
         try:
-            response = client.models.generate_content(
-                model=MODEL_NAME,
-                contents=prompt
-            )
-            brief = response.text.strip()
+            response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+            parsed = json.loads(response.text.strip())
+            plain_reason = parsed.get("plain_reason", "")
+            override_risk = parsed.get("override_risk", "")
+            exception_mitigation = parsed.get("exception_mitigation", "")
         except Exception as e:
-            logger.error(f"Gemini brief generation failed: {e}")
-            brief = (
-                f"Safety evaluation complete (brief generation failed). Hard stop: {hard_stop}. "
-                f"Triggered rules: {', '.join([r['code'] for r in triggered_rules]) if triggered_rules else 'none'}."
-            )
+            logger.error(f"Gemini structured explanation failed: {e}")
+            fallback_expl = _mock_structured_explanation(event_type, severity, hard_stop, triggered_rules)
+            plain_reason = fallback_expl["plain_reason"]
+            override_risk = fallback_expl["override_risk"]
+            exception_mitigation = fallback_expl["exception_mitigation"]
 
     # 5. Generate advisory considerations (best practices relevant to event category)
     advisory_considerations = ""
@@ -206,7 +242,9 @@ Keep the advisory brief, professional, and structured as bullet points (under 80
     return {
         "hard_stop": hard_stop,
         "triggered_rules": triggered_rules,
-        "brief": brief,
+        "plain_reason": plain_reason,
+        "override_risk": override_risk,
+        "exception_mitigation": exception_mitigation,
         "advisory_considerations": advisory_considerations,
         "advisory_disclaimer": _ADVISORY_DISCLAIMER,
         "fallback_mode_active": fallback_mode,
