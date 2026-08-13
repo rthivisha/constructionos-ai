@@ -65,5 +65,12 @@ This file tracks features built in this project, summarizing what was built and 
 ### 2026-08-13
 - **Attachment Security & Persistence Verification**: Verified and added automated test coverage in [test_events_pipeline.py](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/tests/test_events_pipeline.py) confirming that raw base64 strings are excluded from DB storage and path traversal filenames are sanitized.
 - **Finance Agent Calculation ID Fix**: Removed invalid `global _fallback_seq_ids` statement from `_get_or_create_calculation_id` in [finance_agent.py](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/backend/agents/finance_agent.py).
+- **Dashboard CTA Button Relocation & Prominent Styling**: Updated [page.tsx](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/frontend/app/page.tsx):
+  - Moved the setup page link out of the muted header navigation bar.
+  - Placed a prominent action button directly below the main page subtitle, positioned above the site disruption report intake card.
+  - Renamed button label to "View & Edit Project Data".
+  - Styled with a solid fill blue background (`bg-blue-600 hover:bg-blue-500`) matching "Run Pipeline", with shadow glow and focus rings for maximum visibility.
+  - Confirmed `/setup` routing target remains unchanged.
+
 
 
