@@ -61,3 +61,9 @@ This file tracks features built in this project, summarizing what was built and 
   - **Sleek Upload UI & Validation**: In [EventInput.tsx](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/frontend/app/components/EventInput.tsx), added a paperclip attach icon, inline warning blocks for client-side type/size rejection, selected filename badges with instant remove actions, and reader conversions.
   - **Stage 1 Attachment Rendering**: In [ReasoningTrace.tsx](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/frontend/app/components/ReasoningTrace.tsx), rendered attached files under Stage 1 (Observation & Intake) with image thumbnails for pictures, generic document cards for PDFs, and direct download links to the backend uploads path.
   - **Verification**: Created 3 new integration tests in [test_events_pipeline.py](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/tests/test_events_pipeline.py) covering successful uploads, invalid extension blocks, and oversized file rejections. Verified all 8 pipeline tests pass successfully. Runs manually tested and verified.
+
+### 2026-08-13
+- **Attachment Security & Persistence Verification**: Verified and added automated test coverage in [test_events_pipeline.py](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/tests/test_events_pipeline.py) confirming that:
+  - Raw base64 attachment payload strings are completely stripped prior to DB persistence, ensuring `site_events.pipeline_response` stores only file metadata (`filename`, `url`, `content_type`).
+  - Path traversal inputs (e.g., `../../../etc/passwd_test.png`) are sanitized via `os.path.basename` for display, while on-disk file creation strictly uses isolated UUID filenames inside `backend/uploads`.
+

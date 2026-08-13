@@ -412,3 +412,100 @@ def test_pipeline_attachment_oversized():
     response = client.post("/api/events", json=payload)
     assert response.status_code == 400
     assert "exceeds" in response.json()["detail"]
+
+
+@patch('backend.routes.events.observe_event')
+@patch('backend.routes.events.assess_safety')
+@patch('backend.routes.events.assess_finance')
+@patch('backend.routes.events.assess_tradeoff')
+def test_pipeline_attachment_path_traversal_and_db_persistence(mock_tradeoff, mock_finance, mock_safety, mock_observe):
+    import backend.routes.events
+    mock_observe.return_value = {
+        "event_type": "excavation",
+        "task_id": "T-102",
+        "severity": 4,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    mock_safety.return_value = {
+        "hard_stop": False,
+        "triggered_rules": [],
+        "brief": "Safety check complete.",
+        "fallback_mode_active": False,
+        "parse_error": False
+    }
+    mock_finance.return_value = {
+        "status": "success",
+        "task_id": "T-102",
+        "delay_days_used": 2,
+        "delay_source": "severity_fallback",
+        "cpm_result": {
+            "assigned_crew": "L&T Construction",
+            "project_delay": 2,
+            "total_financial_exposure": 400000.0,
+            "parse_error": False
+        },
+        "summary": "Financial estimation complete."
+    }
+    mock_tradeoff.return_value = {
+        "decision": "continue",
+        "reasoning": "Work continues.",
+        "rejected_alternative": "halt",
+        "rejected_because": "cost low."
+    }
+
+    fake_png_base64 = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNkYAAAAAYAAjCB0C8AAAAASUVORK5CYII="
+    malicious_filename = "../../../etc/passwd_test.png"
+
+    payload = {
+        "event_text": "Path traversal test event",
+        "attachment": {
+            "filename": malicious_filename,
+            "content_type": "image/png",
+            "data": fake_png_base64
+        }
+    }
+
+    response = client.post("/api/events", json=payload)
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert "attachment" in data
+    # Verify path traversal string was stripped to safe basename
+    assert data["attachment"]["filename"] == "passwd_test.png"
+    assert "../" not in data["attachment"]["filename"]
+    
+    # Verify file saved on disk under backend/uploads directory using UUID
+    current_dir = os.path.dirname(os.path.abspath(backend.routes.events.__file__))
+    uploads_dir = os.path.join(os.path.dirname(current_dir), "uploads")
+    unique_filename = data["attachment"]["url"].split("/")[-1]
+    saved_file_path = os.path.join(uploads_dir, unique_filename)
+    
+    assert os.path.exists(saved_file_path)
+    assert os.path.dirname(saved_file_path) == uploads_dir
+
+    # Verify site_events DB table persistence
+    conn = sqlite3.connect(backend.db.DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute("SELECT filename, file_path, pipeline_response FROM site_events ORDER BY id DESC LIMIT 1;")
+    db_row = cursor.fetchone()
+    conn.close()
+
+    assert db_row is not None
+    db_filename, db_file_path, db_pipeline_response = db_row
+    assert db_filename == "passwd_test.png"
+    assert db_file_path.startswith("/uploads/")
+    
+    # Verify pipeline_response JSON does NOT contain the raw base64 string
+    assert fake_png_base64 not in db_pipeline_response
+    parsed_response = json.loads(db_pipeline_response)
+    assert "attachment" in parsed_response
+    assert "data" not in parsed_response["attachment"]
+    assert parsed_response["attachment"]["filename"] == "passwd_test.png"
+
+    # Cleanup test file
+    try:
+        os.remove(saved_file_path)
+    except OSError:
+        pass
+
