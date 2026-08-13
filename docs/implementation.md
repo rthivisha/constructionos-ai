@@ -63,7 +63,7 @@ This file tracks features built in this project, summarizing what was built and 
   - **Verification**: Created 3 new integration tests in [test_events_pipeline.py](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/tests/test_events_pipeline.py) covering successful uploads, invalid extension blocks, and oversized file rejections. Verified all 8 pipeline tests pass successfully. Runs manually tested and verified.
 
 ### 2026-08-13
-- **Attachment Security & Persistence Verification**: Verified and added automated test coverage in [test_events_pipeline.py](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/tests/test_events_pipeline.py) confirming that:
-  - Raw base64 attachment payload strings are completely stripped prior to DB persistence, ensuring `site_events.pipeline_response` stores only file metadata (`filename`, `url`, `content_type`).
-  - Path traversal inputs (e.g., `../../../etc/passwd_test.png`) are sanitized via `os.path.basename` for display, while on-disk file creation strictly uses isolated UUID filenames inside `backend/uploads`.
+- **Attachment Security & Persistence Verification**: Verified and added automated test coverage in [test_events_pipeline.py](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/tests/test_events_pipeline.py) confirming that raw base64 strings are excluded from DB storage and path traversal filenames are sanitized.
+- **Finance Agent Calculation ID Fix**: Removed invalid `global _fallback_seq_ids` statement from `_get_or_create_calculation_id` in [finance_agent.py](file:///c:/Users/rthiv/Desktop/CONSTRUCTION_OS/backend/agents/finance_agent.py).
+
 

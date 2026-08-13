@@ -83,7 +83,6 @@ def _get_or_create_calculation_id(task_id: str, delay_days: int) -> str:
             logger.warning(f"Error checking sequential calculation ID in database: {e}")
 
     # Fallback to local cache
-    global _fallback_seq_ids
     if not hasattr(_get_or_create_calculation_id, "_fallback_seq_ids"):
         _get_or_create_calculation_id._fallback_seq_ids = {}
     key = (task_id, delay_days)
