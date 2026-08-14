@@ -111,19 +111,142 @@ _DEFAULT_ADVISORY = (
 )
 
 
+def _generate_5tier_safety_filter(
+    event_type: str,
+    severity: int,
+    hard_stop: bool,
+    triggered_rules: List[Dict[str, str]],
+    plain_reason: str
+) -> Dict[str, Any]:
+    """
+    Categorizes safety action using the 5-Tier Safety Filter schema:
+      - safety_status: "BLOCKED" | "CLEAR"
+      - blocked_action: string identifier for unsafe action being attempted
+      - regulatory_rule_violated: name/code of regulation violated
+      - violation_reason: factual description of hazard
+      - mandatory_field_controls: crew instructions for ground handling
+      - counterfactual_analysis_target: action simulation configuration for Finance/CPM engine
+      - suggested_compliant_alternatives: safety-compliant workarounds
+    """
+    safety_status = "BLOCKED" if hard_stop else "CLEAR"
+    rule_codes = ", ".join(r['code'] for r in triggered_rules) if triggered_rules else "NONE"
+    
+    if hard_stop:
+        if event_type == "extreme_weather":
+            blocked_action = "continue_outdoor_crane_and_site_operations"
+            mandatory_field_controls = [
+                "Issue an immediate stop-work order across the entire site",
+                "Enforce mandatory rest periods for all personnel in shaded, cooled areas to prevent heat exposure",
+                "Secure all loose materials, scaffolding panels, and unsecured equipment immediately",
+                "Monitor weather alerts hourly and do not resume work until wind speed drops below 45 km/h and weather clears",
+                "Issue a weather-standdown memo to all contractors and log the exact stoppage timestamp in the site diary"
+            ]
+            suggested_compliant_alternatives = [
+                "Resequence indoor mechanical, electrical, and plumbing (MEP) installation tasks",
+                "Shift heavy outdoor concrete pouring and crane operations to cooler night hours",
+                "Mobilize additional crew shifts following standdown to compress remaining critical path tasks safely"
+            ]
+        elif event_type == "work_at_height":
+            blocked_action = "continue_high_elevation_rigging_and_lifting"
+            mandatory_field_controls = [
+                "Conduct immediate physical inspection of all harnesses, lanyards, and anchor points",
+                "Verify crane hoist mechanism and wire-rope integrity with a certified lifting equipment engineer",
+                "Issue a site-wide toolbox talk covering fall-clearance calculations and emergency rescue protocol"
+            ]
+            suggested_compliant_alternatives = [
+                "Utilize ground-level pre-assembly prior to hoisting",
+                "Deploy certified mobile elevating work platforms (MEWP) with secondary arrest lines",
+                "Resequence lower-tier structural connections"
+            ]
+        elif event_type == "excavation":
+            blocked_action = "continue_trench_excavation_and_entry"
+            mandatory_field_controls = [
+                "Verify trench shoring and shielding stability before allowing personnel near excavation faces",
+                "Conduct atmospheric hazard check (oxygen, CO, methane) at trench entry points",
+                "Ensure physical barriers and warning tape are installed around all open excavation perimeters"
+            ]
+            suggested_compliant_alternatives = [
+                "Install hydraulic trench shoring boxes before further digging",
+                "Implement benching and sloping protocols per engineering spec",
+                "Divert groundwater using dewatering sump pumps"
+            ]
+        elif event_type == "toxic_gas":
+            blocked_action = "continue_confined_space_work"
+            mandatory_field_controls = [
+                "Confirm ventilation system is operational and air quality readings are within safe limits before re-entry",
+                "Ensure all personnel have functioning PPE (respirators, gloves) available on-site",
+                "Log the incident in the site safety diary and notify the site safety officer immediately"
+            ]
+            suggested_compliant_alternatives = [
+                "Deploy forced positive-pressure ventilation fans",
+                "Perform continuous multi-gas monitoring during work",
+                "Assign dedicated standby safety observers at entry points"
+            ]
+        else:
+            blocked_action = f"continue_{event_type or 'site'}_operations"
+            mandatory_field_controls = [
+                "Halt high-risk operations immediately",
+                "Establish safety perimeter around affected area",
+                "Report conditions to site safety supervisor"
+            ]
+            suggested_compliant_alternatives = [
+                "Perform job safety analysis (JSA) before resuming work",
+                "Deploy auxiliary safety controls and personal protective equipment",
+                "Resequence unimpacted off-path site tasks"
+            ]
+    else:
+        blocked_action = "none"
+        mandatory_field_controls = [
+            "Follow standard job safety analysis procedures",
+            "Review contractor safety compliance logs",
+            "Report any hazardous conditions to site supervisor"
+        ]
+        suggested_compliant_alternatives = [
+            "Proceed with planned schedule under standard site supervision"
+        ]
+
+    violation_reason = plain_reason or (
+        f"Site event (category: {event_type}, severity {severity}/10) violated regulation {rule_codes}."
+        if hard_stop else "No regulatory rule violations detected."
+    )
+
+    return {
+        "safety_status": safety_status,
+        "blocked_action": blocked_action,
+        "regulatory_rule_violated": rule_codes,
+        "violation_reason": violation_reason,
+        "mandatory_field_controls": mandatory_field_controls,
+        "counterfactual_analysis_target": {
+            "action_to_simulate": blocked_action,
+            "simulation_type": "COUNTERFACTUAL_EXPOSURE"
+        },
+        "suggested_compliant_alternatives": suggested_compliant_alternatives
+    }
+
+
 def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] = None) -> Dict[str, Any]:
     """
     Evaluates safety compliance by matching the event type against active regulatory rules.
     Issues a HARD_STOP if any matching rule is found.
     In mock mode (USE_MOCK_LLM=true), returns deterministic results with no API calls.
-    Brief is always generated from a template interpolating actual hard_stop/triggered_rules values —
-    never independently-authored canned text — to prevent narrative/decision mismatches structurally.
+    Includes the 5-Tier Safety Filter output (safety_status, blocked_action, regulatory_rule_violated,
+    violation_reason, mandatory_field_controls, counterfactual_analysis_target, suggested_compliant_alternatives).
     """
     # 1. Handle upstream parse errors
     if observe_output.get("parse_error"):
         logger.warning("Safety assessment halted due to upstream parse error.")
         return {
             "hard_stop": False,
+            "safety_status": "UNAVAILABLE",
+            "blocked_action": "none",
+            "regulatory_rule_violated": "NONE",
+            "violation_reason": "Safety assessment halted: Observe Agent failed to parse the event.",
+            "mandatory_field_controls": [],
+            "counterfactual_analysis_target": {
+                "action_to_simulate": "none",
+                "simulation_type": "COUNTERFACTUAL_EXPOSURE"
+            },
+            "suggested_compliant_alternatives": [],
             "triggered_rules": [],
             "plain_reason": "Safety assessment halted: Observe Agent failed to parse the event.",
             "override_risk": "",
@@ -159,8 +282,18 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
         logger.info("[MOCK MODE] Safety Agent running without Gemini API call.")
         explanation = _mock_structured_explanation(event_type, severity, hard_stop, triggered_rules)
         advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
+        tier5 = _generate_5tier_safety_filter(
+            event_type, severity, hard_stop, triggered_rules, explanation["plain_reason"]
+        )
         return {
             "hard_stop": hard_stop,
+            "safety_status": tier5["safety_status"],
+            "blocked_action": tier5["blocked_action"],
+            "regulatory_rule_violated": tier5["regulatory_rule_violated"],
+            "violation_reason": tier5["violation_reason"],
+            "mandatory_field_controls": tier5["mandatory_field_controls"],
+            "counterfactual_analysis_target": tier5["counterfactual_analysis_target"],
+            "suggested_compliant_alternatives": tier5["suggested_compliant_alternatives"],
             "triggered_rules": triggered_rules,
             "plain_reason": explanation["plain_reason"],
             "override_risk": explanation["override_risk"],
@@ -239,8 +372,19 @@ Keep the advisory brief, professional, and structured as bullet points (under 80
             logger.error(f"Gemini advisory considerations generation failed: {e}")
             advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
 
+    tier5 = _generate_5tier_safety_filter(
+        event_type, severity, hard_stop, triggered_rules, plain_reason
+    )
+
     return {
         "hard_stop": hard_stop,
+        "safety_status": tier5["safety_status"],
+        "blocked_action": tier5["blocked_action"],
+        "regulatory_rule_violated": tier5["regulatory_rule_violated"],
+        "violation_reason": tier5["violation_reason"],
+        "mandatory_field_controls": tier5["mandatory_field_controls"],
+        "counterfactual_analysis_target": tier5["counterfactual_analysis_target"],
+        "suggested_compliant_alternatives": tier5["suggested_compliant_alternatives"],
         "triggered_rules": triggered_rules,
         "plain_reason": plain_reason,
         "override_risk": override_risk,
@@ -250,3 +394,4 @@ Keep the advisory brief, professional, and structured as bullet points (under 80
         "fallback_mode_active": fallback_mode,
         "parse_error": False
     }
+

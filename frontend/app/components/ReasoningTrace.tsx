@@ -30,6 +30,16 @@ interface ReasoningTraceProps {
     };
     safety_assessment: {
       hard_stop: boolean;
+      safety_status?: string;
+      blocked_action?: string;
+      regulatory_rule_violated?: string;
+      violation_reason?: string;
+      mandatory_field_controls?: string[];
+      counterfactual_analysis_target?: {
+        action_to_simulate: string;
+        simulation_type: string;
+      };
+      suggested_compliant_alternatives?: string[];
       triggered_rules: { code: string; description: string }[];
       plain_reason: string;
       override_risk?: string;
@@ -457,6 +467,62 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                 )}
               </div>
             </div>
+
+            {/* 5-Tier Safety Filter Output Block */}
+            {safety_assessment.safety_status && (
+              <div className="rounded-2xl border border-red-500/20 bg-slate-950/70 p-5 space-y-4 shadow-xl">
+                <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/6 pb-3">
+                  <div>
+                    <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Action Categorization (5-Tier Safety Filter)</span>
+                    <h4 className="text-base font-black text-slate-100 mt-0.5 flex items-center gap-2">
+                      <span className={cn(
+                        "w-2.5 h-2.5 rounded-full inline-block",
+                        safety_assessment.safety_status === "BLOCKED" ? "bg-red-500 animate-ping" : "bg-emerald-500"
+                      )} />
+                      {safety_assessment.safety_status}: {safety_assessment.blocked_action}
+                    </h4>
+                  </div>
+                  {safety_assessment.counterfactual_analysis_target && (
+                    <div className="px-3 py-1 rounded-lg border border-sky-500/30 bg-sky-500/10 text-sky-300 text-[11px] font-mono font-bold flex items-center gap-1.5">
+                      <span>Sim Target:</span>
+                      <span className="underline decoration-sky-400/50">{safety_assessment.counterfactual_analysis_target.action_to_simulate}</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  {/* Mandatory Field Controls */}
+                  {safety_assessment.mandatory_field_controls && safety_assessment.mandatory_field_controls.length > 0 && (
+                    <div className="rounded-xl border border-red-500/15 bg-red-500/[0.03] p-4 space-y-2">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-red-400">Mandatory Field Controls</p>
+                      <ul className="space-y-1.5 text-xs text-slate-300">
+                        {safety_assessment.mandatory_field_controls.map((ctrl, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-red-400 shrink-0 font-bold">•</span>
+                            <span className="leading-snug">{ctrl}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+
+                  {/* Suggested Compliant Alternatives */}
+                  {safety_assessment.suggested_compliant_alternatives && safety_assessment.suggested_compliant_alternatives.length > 0 && (
+                    <div className="rounded-xl border border-emerald-500/15 bg-emerald-500/[0.03] p-4 space-y-2">
+                      <p className="text-[10px] font-extrabold uppercase tracking-wider text-emerald-400">Suggested Compliant Alternatives</p>
+                      <ul className="space-y-1.5 text-xs text-slate-300">
+                        {safety_assessment.suggested_compliant_alternatives.map((alt, i) => (
+                          <li key={i} className="flex items-start gap-2">
+                            <span className="text-emerald-400 shrink-0 font-bold">✓</span>
+                            <span className="leading-snug">{alt}</span>
+                          </li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
+                </div>
+              </div>
+            )}
 
             {/* Bottom Action Bar */}
             <div className="pt-4 border-t border-white/6 flex justify-between items-center">

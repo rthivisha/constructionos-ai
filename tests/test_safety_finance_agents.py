@@ -343,3 +343,21 @@ def test_safety_agent_advisory_isolation():
         assert "shoring" in res_no_match["advisory_considerations"].lower()
         assert "derived deterministically" in res_no_match["advisory_disclaimer"]
 
+
+def test_safety_agent_5tier_filter_output():
+    observe_output_blocked = {
+        "event_type": "work_at_height",
+        "task_id": "T-101",
+        "severity": 8,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res = assess_safety(observe_output_blocked, "Crane lift work at height report.")
+        assert res["safety_status"] == "BLOCKED"
+        assert res["blocked_action"] == "continue_high_elevation_rigging_and_lifting"
+        assert "BOCW_SEC_40" in res["regulatory_rule_violated"]
+        assert len(res["mandatory_field_controls"]) >= 3
+        assert res["counterfactual_analysis_target"]["simulation_type"] == "COUNTERFACTUAL_EXPOSURE"
+        assert res["counterfactual_analysis_target"]["action_to_simulate"] == res["blocked_action"]
+        assert len(res["suggested_compliant_alternatives"]) >= 2
