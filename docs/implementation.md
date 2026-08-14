@@ -72,5 +72,5 @@ This file tracks features built in this project, summarizing what was built and 
   - Styled with a solid fill blue background (`bg-blue-600 hover:bg-blue-500`) matching "Run Pipeline", with shadow glow and focus rings for maximum visibility.
   - Confirmed `/setup` routing target remains unchanged.
 
-
-
+### 2026-08-14
+- **Backend & Frontend Execution**: Launched the FastAPI backend application on `http://127.0.0.1:8000` and the Next.js frontend application on `http://localhost:3000`.
