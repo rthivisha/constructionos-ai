@@ -86,6 +86,15 @@ def init_db():
     );
     """)
 
+    cursor.execute("""
+    CREATE TABLE IF NOT EXISTS query_cache (
+        normalized_input_hash TEXT PRIMARY KEY,
+        original_input_text TEXT NOT NULL,
+        full_pipeline_response TEXT NOT NULL,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    );
+    """)
+
     conn.commit()
 
     # Check if project_meta is empty -> Seed the database
@@ -142,5 +151,83 @@ def init_db():
     
     conn.close()
 
+# ===========================================================================
+# Query Response Cache Helper Functions
+# ===========================================================================
+# SAFETY BOUNDARY CONSTRAINT:
+# Only exact normalized-text matches (lowercase, trimmed, single whitespace,
+# SHA-256 hashed) will be cached and served from query_cache.
+# Fuzzy matching, approximate matching, or keyword similarity search are
+# strictly forbidden so that safety-critical compliance evaluations are never
+# served from an approximate match.
+# ===========================================================================
+
+def get_cached_response(normalized_hash: str):
+    """
+    Retrieves a cached full pipeline response by exact normalized SHA-256 hash.
+    Returns parsed dictionary or None if cache miss.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            "SELECT full_pipeline_response FROM query_cache WHERE normalized_input_hash = ?;",
+            (normalized_hash,)
+        )
+        row = cursor.fetchone()
+        if row:
+            return json.loads(row["full_pipeline_response"])
+        return None
+    except Exception as e:
+        print(f"Warning: Failed to retrieve cached query response: {e}")
+        return None
+    finally:
+        conn.close()
+
+def save_cached_response(normalized_hash: str, original_text: str, response: dict):
+    """
+    Saves a successful live pipeline response to query_cache.
+    WARNING: Only genuine live-Gemini responses with fallback_mode_active=False
+    and without parse errors should be saved here.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute(
+            """
+            INSERT OR REPLACE INTO query_cache (normalized_input_hash, original_input_text, full_pipeline_response)
+            VALUES (?, ?, ?);
+            """,
+            (normalized_hash, original_text, json.dumps(response))
+        )
+        conn.commit()
+    except Exception as e:
+        print(f"Warning: Failed to save query response to cache: {e}")
+        conn.rollback()
+    finally:
+        conn.close()
+
+def clear_query_cache() -> int:
+    """
+    Clears all entries from the query_cache table.
+    Invoked when any project-setup data (contractors, divisions, schedule_tasks, regulatory_kb)
+    is modified to prevent serving stale financial or safety numbers.
+    """
+    conn = get_db_connection()
+    try:
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM query_cache;")
+        deleted_count = cursor.rowcount
+        conn.commit()
+        print(f"[CACHE INVALIDATION] Cleared query_cache table ({deleted_count} rows removed).")
+        return deleted_count
+    except Exception as e:
+        print(f"Warning: Failed to clear query_cache: {e}")
+        conn.rollback()
+        return 0
+    finally:
+        conn.close()
+
 if __name__ == "__main__":
     init_db()
+

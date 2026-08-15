@@ -11,7 +11,7 @@ from google.genai import types
 from backend.agents.observe_agent import get_api_key
 from backend.tools.cpm_engine import get_project_state, get_task_impact, recalculate_schedule
 import backend.db
-from backend.config import MODEL_NAME, use_mock_llm, ASSUMED_DAILY_WAGE_PER_WORKER
+from backend.config import MODEL_NAME, use_mock_llm, ASSUMED_DAILY_WAGE_PER_WORKER, call_gemini_with_retry
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -109,6 +109,7 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
             "task_id": None,
             "delay_days_used": None,
             "delay_source": None,
+            "fallback_mode_active": True,
             "cpm_result": {
                 "assigned_crew": None,
                 "daily_operating_cost": None,
@@ -121,7 +122,7 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
                 "breakdown": None,
                 "tasks": None,
                 "halted_task_id": None,
-                "fallback_mode_active": False,
+                "fallback_mode_active": True,
                 "parse_error": True
             },
             "cost_breakdown": None,
@@ -139,6 +140,7 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
             "task_id": None,
             "delay_days_used": None,
             "delay_source": None,
+            "fallback_mode_active": observe_output.get("fallback_mode_active", False),
             "cpm_result": {
                 "assigned_crew": None,
                 "daily_operating_cost": None,
@@ -151,7 +153,7 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
                 "breakdown": None,
                 "tasks": None,
                 "halted_task_id": None,
-                "fallback_mode_active": False,
+                "fallback_mode_active": observe_output.get("fallback_mode_active", False),
                 "parse_error": False
             },
             "cost_breakdown": None,
@@ -173,6 +175,7 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
             "task_id": task_id,
             "delay_days_used": None,
             "delay_source": None,
+            "fallback_mode_active": state_fallback or observe_output.get("fallback_mode_active", False),
             "cpm_result": {
                 "assigned_crew": None,
                 "daily_operating_cost": None,
@@ -200,6 +203,7 @@ def assess_finance(observe_output: Dict[str, Any], raw_event_text: Optional[str]
     delay_days = None
     delay_source = None
     api_key = get_api_key()
+    agent_fallback = False
 
     if api_key and raw_event_text and not use_mock_llm():
         client = genai.Client(api_key=api_key)
@@ -214,13 +218,17 @@ If the text explicitly mentions a delay duration in days (e.g. "delayed by 5 day
 If no delay duration is explicitly mentioned in the text, return null.
 """
         try:
-            response = client.models.generate_content(
+            response = call_gemini_with_retry(
+                client=client,
                 model=MODEL_NAME,
                 contents=prompt_extraction,
                 config=types.GenerateContentConfig(
                     response_mime_type="application/json",
                     response_schema=DelayExtractionSchema,
                 ),
+                max_retries=3,
+                initial_delay=1.0,
+                backoff_factor=2.0
             )
             data = json.loads(response.text)
             extracted_days = data.get("delay_days")
@@ -228,7 +236,8 @@ If no delay duration is explicitly mentioned in the text, return null.
                 delay_days = int(extracted_days)
                 delay_source = "extracted_from_text"
         except Exception as e:
-            logger.warning(f"Failed to extract delay days via Gemini: {e}")
+            logger.warning(f"Failed to extract delay days via Gemini after retries: {e}")
+            agent_fallback = True
 
     # Fallback to documented severity mapping
     if delay_days is None:
@@ -246,6 +255,7 @@ If no delay duration is explicitly mentioned in the text, return null.
             "task_id": task_id,
             "delay_days_used": delay_days,
             "delay_source": delay_source,
+            "fallback_mode_active": True,
             "cpm_result": {
                 "assigned_crew": None,
                 "daily_operating_cost": None,
@@ -258,7 +268,7 @@ If no delay duration is explicitly mentioned in the text, return null.
                 "breakdown": None,
                 "tasks": None,
                 "halted_task_id": task_id,
-                "fallback_mode_active": state_fallback,
+                "fallback_mode_active": True,
                 "parse_error": False
             },
             "cost_breakdown": None,
@@ -292,19 +302,25 @@ If no delay duration is explicitly mentioned in the text, return null.
             "Keep the summary under 120 words."
         )
         try:
-            res = client.models.generate_content(
+            res = call_gemini_with_retry(
+                client=client,
                 model=MODEL_NAME,
-                contents=prompt_brief
+                contents=prompt_brief,
+                max_retries=3,
+                initial_delay=1.0,
+                backoff_factor=2.0
             )
             brief = res.text.strip()
         except Exception as e:
-            logger.error(f"Gemini brief generation failed: {e}")
+            logger.error(f"Gemini brief generation failed after retries: {e}")
+            agent_fallback = True
             brief = (
                 f"Financial evaluation complete. "
                 f"Marginal exposure is {schedule_result['total_financial_exposure']} INR "
                 f"with project delay of {schedule_result['project_delay']} days."
             )
     else:
+        agent_fallback = True
         prefix = "[MOCK] " if use_mock_llm() else ""
         brief = (
             f"{prefix}Financial Impact Assessment: Task {task_id} ({task_name}) "
@@ -333,12 +349,15 @@ If no delay duration is explicitly mentioned in the text, return null.
         contractor_penalty_rate=impact["contractor_penalty_rate"],
     )
 
+    fallback_active = agent_fallback or state_fallback or bool(schedule_result.get("fallback_mode_active")) or observe_output.get("fallback_mode_active", False)
+
     # Return structured schema
     return {
         "status": "success",
         "task_id": task_id,
         "delay_days_used": delay_days,
         "delay_source": delay_source,
+        "fallback_mode_active": fallback_active,
         "cpm_result": {
             "scope": "project_cascade",
             "assigned_crew": impact["assigned_crew"],
@@ -353,7 +372,7 @@ If no delay duration is explicitly mentioned in the text, return null.
             "tasks": schedule_result["tasks"],
             "halted_task_id": task_id,
             "delay_days": delay_days,
-            "fallback_mode_active": schedule_result["fallback_mode_active"] or state_fallback,
+            "fallback_mode_active": fallback_active,
             "parse_error": False
         },
         "cost_breakdown": breakdown_data["cost_breakdown"],
@@ -361,6 +380,7 @@ If no delay duration is explicitly mentioned in the text, return null.
         "calculation_id": breakdown_data["calculation_id"],
         "summary": brief
     }
+
 
 
 # ---------------------------------------------------------------------------

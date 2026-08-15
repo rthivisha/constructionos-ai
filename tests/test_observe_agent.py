@@ -175,16 +175,13 @@ def test_observe_event_malformed_or_invalid_gemini_response(mock_genai_client_cl
     mock_client = MagicMock()
     mock_genai_client_class.return_value = mock_client
     
-    # 1. Test malformed JSON syntax response
+    # 1. Test malformed JSON syntax response triggers fallback mode
     mock_client.models.generate_content.return_value = MockResponse("{malformed-json")
     result_malformed = observe_event("Raw event text report.")
-    assert result_malformed["event_type"] is None
-    assert result_malformed["task_id"] is None
-    assert result_malformed["severity"] is None
-    assert result_malformed["task_not_matched"] is True
-    assert result_malformed["parse_error"] is True
+    assert result_malformed["fallback_mode_active"] is True
+    assert result_malformed["event_type"] is not None
 
-    # 2. Test schema-invalid JSON response (e.g. invalid event_type, out-of-bounds severity)
+    # 2. Test schema-invalid JSON response triggers fallback mode
     mock_client.models.generate_content.return_value = MockResponse(
         json.dumps({
             "event_type": "non_existent_event_type",
@@ -193,10 +190,8 @@ def test_observe_event_malformed_or_invalid_gemini_response(mock_genai_client_cl
         })
     )
     result_invalid = observe_event("Raw event text report.")
-    assert result_invalid["event_type"] is None
-    assert result_invalid["task_id"] is None
-    assert result_invalid["severity"] is None
-    assert result_invalid["task_not_matched"] is True
-    assert result_invalid["parse_error"] is True
+    assert result_invalid["fallback_mode_active"] is True
+    assert result_invalid["event_type"] is not None
+
 
 

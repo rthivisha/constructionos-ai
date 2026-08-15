@@ -6,7 +6,7 @@ from google import genai
 from google.genai import types
 
 from backend.agents.observe_agent import get_api_key
-from backend.config import MODEL_NAME, use_mock_llm
+from backend.config import MODEL_NAME, use_mock_llm, call_gemini_with_retry
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -38,7 +38,6 @@ def assess_tradeoff(
         hard_stop = safety_output.get("hard_stop", False)
         triggered_rules = safety_output.get("triggered_rules", [])
 
-
     # 2. Determine Finance status
     finance_valid = False
     if isinstance(finance_output, dict):
@@ -48,6 +47,12 @@ def assess_tradeoff(
         if status == "success" and not parse_error:
             finance_valid = True
 
+    upstream_fallback = (
+        bool(safety_output and safety_output.get("fallback_mode_active"))
+        or bool(finance_output and finance_output.get("fallback_mode_active"))
+        or use_mock_llm()
+    )
+
     # 3. Path A: Safety is unavailable (FAIL-SAFE HALT)
     if not safety_valid:
         logger.warning("Safety output unavailable/invalid. Defaulting to safe halt.")
@@ -55,7 +60,8 @@ def assess_tradeoff(
             "decision": "halt",
             "reasoning": "Safety assessment is unavailable due to an agent error or parse failure. Operation must halt to prevent unmitigated safety hazards.",
             "rejected_alternative": "continue",
-            "rejected_because": "safety compliance cannot be verified, rendering operations unsafe to proceed."
+            "rejected_because": "safety compliance cannot be verified, rendering operations unsafe to proceed.",
+            "fallback_mode_active": True
         }
 
     # 4. Path B: Safety HARD_STOP is True (DEMAND HALT - NON-NEGOTIABLE)
@@ -63,6 +69,7 @@ def assess_tradeoff(
         logger.info("Safety HARD_STOP triggered. Halting operations.")
         rules_str = ", ".join([r.get("code", "") for r in triggered_rules])
         default_reasoning = f"Operations halted due to a non-negotiable regulatory HARD_STOP rule check (rules: {rules_str})."
+        agent_fallback = False
         
         api_key = get_api_key()
         if api_key and not use_mock_llm():
@@ -80,22 +87,34 @@ Write a narrative reasoning explaining the halt. Highlight the importance of reg
 WARNING: Do not contradict the decision to halt. Keep it under 100 words.
 """
             try:
-                response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+                response = call_gemini_with_retry(
+                    client=client,
+                    model=MODEL_NAME,
+                    contents=prompt,
+                    max_retries=3,
+                    initial_delay=1.0,
+                    backoff_factor=2.0
+                )
                 default_reasoning = response.text.strip()
             except Exception as e:
-                logger.error(f"Gemini tradeoff reasoning failed: {e}")
+                logger.error(f"Gemini tradeoff reasoning failed after retries: {e}")
+                agent_fallback = True
+        else:
+            agent_fallback = True
 
         return {
             "decision": "halt",
             "reasoning": default_reasoning,
             "rejected_alternative": "continue",
-            "rejected_because": "regulatory hard stop is non-negotiable and safety compliance is absolute."
+            "rejected_because": "regulatory hard stop is non-negotiable and safety compliance is absolute.",
+            "fallback_mode_active": upstream_fallback or agent_fallback
         }
 
     # 5. Path C: Safety is active (no hard_stop) but Finance is unavailable/insufficient/errored
     if not finance_valid:
         logger.info("Safety has no hard stop, but Finance is unavailable. Continuing on safety alone.")
         default_reasoning = "No regulatory safety hard stop was triggered. Operations are allowed to continue. Financial delay cost exposure could not be assessed."
+        agent_fallback = False
         
         api_key = get_api_key()
         if api_key and not use_mock_llm():
@@ -113,16 +132,27 @@ Explain that the decision was made on safety information alone because financial
 WARNING: Do not contradict the decision to continue. Keep it under 100 words.
 """
             try:
-                response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+                response = call_gemini_with_retry(
+                    client=client,
+                    model=MODEL_NAME,
+                    contents=prompt,
+                    max_retries=3,
+                    initial_delay=1.0,
+                    backoff_factor=2.0
+                )
                 default_reasoning = response.text.strip()
             except Exception as e:
-                logger.error(f"Gemini tradeoff reasoning failed: {e}")
+                logger.error(f"Gemini tradeoff reasoning failed after retries: {e}")
+                agent_fallback = True
+        else:
+            agent_fallback = True
 
         return {
             "decision": "continue",
             "reasoning": default_reasoning,
             "rejected_alternative": "halt",
-            "rejected_because": "no safety hazard was detected and financial exposure is unknown, meaning there is no justification to halt."
+            "rejected_because": "no safety hazard was detected and financial exposure is unknown, meaning there is no justification to halt.",
+            "fallback_mode_active": upstream_fallback or agent_fallback
         }
 
     # 6. Path D: Both agents are active and safety is not a hard stop (GEMINI TRADE-OFF WEIGHING)
@@ -151,7 +181,8 @@ WARNING: Do not contradict the decision to continue. Keep it under 100 words.
             "rejected_because": (
                 f"no regulatory violation was triggered and the financial exposure (₹{exposure:,.0f} INR) "
                 f"does not justify a halt — halting would add demobilisation costs with no safety compliance benefit."
-            )
+            ),
+            "fallback_mode_active": True
         }
 
     client = genai.Client(api_key=api_key)
@@ -183,26 +214,33 @@ Weigh the trade-offs:
 Your decision and reasoning must follow the schema strictly.
 """
     try:
-        response = client.models.generate_content(
+        response = call_gemini_with_retry(
+            client=client,
             model=MODEL_NAME,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=TradeoffResponseSchema,
             ),
+            max_retries=3,
+            initial_delay=1.0,
+            backoff_factor=2.0
         )
         data = json.loads(response.text)
         return {
             "decision": data.get("decision", "continue"),
             "reasoning": data.get("reasoning", ""),
             "rejected_alternative": data.get("rejected_alternative", "halt"),
-            "rejected_because": data.get("rejected_because", "")
+            "rejected_because": data.get("rejected_because", ""),
+            "fallback_mode_active": upstream_fallback
         }
     except Exception as e:
-        logger.error(f"Structured Gemini tradeoff query failed: {e}")
+        logger.error(f"Structured Gemini tradeoff query failed after retries: {e}")
         return {
             "decision": "continue",
             "reasoning": f"Work continues since safety hard stop is not triggered. Estimated delay cost exposure: {financial_exposure} INR. (AI reasoning failed).",
             "rejected_alternative": "halt",
-            "rejected_because": "cost of halting outweighs the safety risk when no regulatory violations are triggered."
+            "rejected_because": "cost of halting outweighs the safety risk when no regulatory violations are triggered.",
+            "fallback_mode_active": True
         }
+

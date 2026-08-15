@@ -8,7 +8,7 @@ from google.genai import types
 
 from backend.agents.event_types import EventType
 from backend.tools.cpm_engine import get_project_state
-from backend.config import MODEL_NAME, use_mock_llm
+from backend.config import MODEL_NAME, use_mock_llm, call_gemini_with_retry
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -54,7 +54,7 @@ def get_api_key() -> str:
 
 
 # ---------------------------------------------------------------------------
-# MOCK LLM responses for demo scenarios (USE_MOCK_LLM=true)
+# MOCK LLM responses for demo scenarios (USE_MOCK_LLM=true or fallback)
 # ---------------------------------------------------------------------------
 def _mock_observe(event_text: str) -> Dict[str, Any]:
     """
@@ -71,45 +71,49 @@ def _mock_observe(event_text: str) -> Dict[str, Any]:
 
     # Scenario 1: Tower Crane Lift Failure (T-101) — work_at_height, critical
     if "crane" in text or "hoist" in text or "tower crane" in text or "mechanical failure" in text:
-        logger.info("[MOCK] Observe Agent → crane failure scenario (T-101)")
+        logger.info("[MOCK] Observe Agent -> crane failure scenario (T-101)")
         return {
             "event_type": "work_at_height",
             "task_id": "T-101",
             "severity": 8,
             "task_not_matched": False,
+            "fallback_mode_active": True,
             "parse_error": False
         }
 
     # Scenario 2: Heavy Weather (T-103) — extreme_weather, critical
     if any(w in text for w in ["weather", "rain", "wind", "storm", "monsoon", "flood", "cyclone", "heat"]):
-        logger.info("[MOCK] Observe Agent → heavy weather scenario (T-103)")
+        logger.info("[MOCK] Observe Agent -> heavy weather scenario (T-103)")
         return {
             "event_type": "extreme_weather",
             "task_id": "T-103",
             "severity": 6,
             "task_not_matched": False,
+            "fallback_mode_active": True,
             "parse_error": False
         }
 
     # Scenario 4: Minor Material Delay (T-104) — toxic_gas category (no KB rule), non-critical
     # Matched before ambiguous so specific keywords win
     if any(w in text for w in ["conduit", "electrical", "material", "delivery", "ventilation", "minor", "supply"]):
-        logger.info("[MOCK] Observe Agent → minor material delay scenario (T-104, no KB rule)")
+        logger.info("[MOCK] Observe Agent -> minor material delay scenario (T-104, no KB rule)")
         return {
             "event_type": "toxic_gas",
             "task_id": "T-104",
             "severity": 2,
             "task_not_matched": False,
+            "fallback_mode_active": True,
             "parse_error": False
         }
 
     # Scenario 3: Intentionally Ambiguous Input — excavation, no task match
-    logger.info("[MOCK] Observe Agent → ambiguous input scenario (no task match)")
+    logger.info("[MOCK] Observe Agent -> ambiguous input scenario (no task match)")
     return {
         "event_type": "excavation",
         "task_id": None,
         "severity": 3,
         "task_not_matched": True,
+        "fallback_mode_active": True,
         "parse_error": False
     }
 
@@ -119,7 +123,7 @@ def observe_event(event_text: str) -> Dict[str, Any]:
     Parses and categorizes a raw site event report using Gemini,
     validates the task match against active database tasks,
     and returns a structured output.
-    In mock mode (USE_MOCK_LLM=true), returns deterministic results with no API calls.
+    In mock mode (USE_MOCK_LLM=true) or when API calls fail, returns deterministic results with fallback_mode_active=True.
     """
     # --- MOCK MODE ---
     if use_mock_llm():
@@ -157,18 +161,23 @@ Raw event description:
 
     api_key = get_api_key()
     if not api_key:
-        raise ValueError("GEMINI_API_KEY environment variable is not configured.")
+        logger.warning("GEMINI_API_KEY not configured. Falling back to mock observation.")
+        return _mock_observe(event_text)
         
     client = genai.Client(api_key=api_key)
     
     try:
-        response = client.models.generate_content(
+        response = call_gemini_with_retry(
+            client=client,
             model=MODEL_NAME,
             contents=prompt,
             config=types.GenerateContentConfig(
                 response_mime_type="application/json",
                 response_schema=ObserveResponseSchema,
             ),
+            max_retries=3,
+            initial_delay=1.0,
+            backoff_factor=2.0
         )
         
         # Parse the structured JSON response
@@ -178,15 +187,10 @@ Raw event description:
         parsed_data = ObserveResponseSchema(**data)
         
     except Exception as e:
-        logger.error(f"Gemini API invocation or parsing failed: {e}")
-        # Return distinct error fallback state
-        return {
-            "event_type": None,
-            "task_id": None,
-            "severity": None,
-            "task_not_matched": True,
-            "parse_error": True
-        }
+        logger.error(f"Gemini API invocation or parsing failed after retries: {e}. Falling back to mock logic.")
+        mock_result = _mock_observe(event_text)
+        mock_result["fallback_mode_active"] = True
+        return mock_result
 
     # Validate matched_task_id against database tasks list
     matched_id = parsed_data.matched_task_id
@@ -204,5 +208,7 @@ Raw event description:
         "task_id": task_id,
         "severity": parsed_data.severity,
         "task_not_matched": task_not_matched,
+        "fallback_mode_active": False,
         "parse_error": False
     }
+

@@ -1,7 +1,7 @@
 from fastapi import APIRouter, HTTPException, Depends
 from typing import List
 import sqlite3
-from backend.db import get_db_connection
+from backend.db import get_db_connection, clear_query_cache
 from backend.models import ProjectMeta, Contractor, Division, RegulatoryKb, ScheduleTask, ProjectSetupState
 
 router = APIRouter(prefix="/api/project-setup", tags=["project-setup"])
@@ -77,6 +77,8 @@ def update_project_meta(meta: ProjectMeta):
                 (meta.name, meta.location, meta.total_budget, meta.spent_to_date)
             )
         conn.commit()
+        # Invalidate query cache
+        clear_query_cache()
         return {"status": "success", "message": "Metadata updated successfully"}
     except sqlite3.Error as e:
         conn.rollback()
@@ -107,6 +109,8 @@ def update_contractors(contractors: List[Contractor]):
         "INSERT INTO contractors (name, scope, daily_operating_cost, daily_delay_penalty, active_workers) VALUES (?, ?, ?, ?, ?);",
         rows
     )
+    # Invalidate query cache
+    clear_query_cache()
     return {"status": "success", "message": f"Successfully updated {len(contractors)} contractors."}
 
 @router.put("/divisions")
@@ -143,6 +147,8 @@ def update_divisions(divisions: List[Division]):
         "INSERT INTO divisions (id, name, lead_contractor) VALUES (?, ?, ?);",
         rows
     )
+    # Invalidate query cache
+    clear_query_cache()
     return {"status": "success", "message": f"Successfully updated {len(divisions)} divisions."}
 
 @router.put("/regulatory")
@@ -153,6 +159,8 @@ def update_regulatory_kb(regulatory_kb: List[RegulatoryKb]):
         "INSERT INTO regulatory_kb (code, description, trigger_condition) VALUES (?, ?, ?);",
         rows
     )
+    # Invalidate query cache
+    clear_query_cache()
     return {"status": "success", "message": f"Successfully updated {len(regulatory_kb)} regulatory rules."}
 
 @router.put("/tasks")
@@ -216,4 +224,7 @@ def update_schedule_tasks(tasks: List[ScheduleTask]):
         "INSERT INTO schedule_tasks (task_id, division_id, task_name, duration, is_critical_path, dependencies) VALUES (?, ?, ?, ?, ?, ?);",
         rows
     )
+    # Invalidate query cache
+    clear_query_cache()
     return {"status": "success", "message": f"Successfully updated {len(tasks)} tasks."}
+

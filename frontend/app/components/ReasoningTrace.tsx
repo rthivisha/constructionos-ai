@@ -16,17 +16,21 @@ import {
   MessageSquare,
   FileDown,
   Paperclip,
-  FileText
+  FileText,
+  Zap
 } from "lucide-react";
 
 interface ReasoningTraceProps {
   data: {
+    cached?: boolean;
+    fallback_mode_active?: boolean;
     observation: {
       event_type: string | null;
       task_id: string | null;
       severity: number | null;
       task_not_matched: boolean;
       parse_error: boolean;
+      fallback_mode_active?: boolean;
     };
     safety_assessment: {
       hard_stop: boolean;
@@ -55,6 +59,7 @@ interface ReasoningTraceProps {
       task_id: string | null;
       delay_days_used: number | null;
       delay_source: string | null;
+      fallback_mode_active?: boolean;
       cpm_result?: {
         assigned_crew?: string;
         daily_operating_cost?: number;
@@ -64,6 +69,7 @@ interface ReasoningTraceProps {
         new_project_duration?: number;
         project_delay?: number;
         total_financial_exposure?: number;
+        fallback_mode_active?: boolean;
         breakdown?: {
           operating_cost_exposure: number;
           penalty_exposure: number;
@@ -86,6 +92,7 @@ interface ReasoningTraceProps {
       reasoning: string;
       rejected_alternative: "halt" | "continue";
       rejected_because: string;
+      fallback_mode_active?: boolean;
     };
     attachment?: {
       filename: string;
@@ -165,6 +172,14 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
   const { observation, safety_assessment, financial_assessment, tradeoff_reconciliation } = data;
   const isHardStop = safety_assessment.hard_stop && safety_assessment.status !== "unavailable";
   const isFinanceOk = financial_assessment.status === "success";
+  const isCached = Boolean(data.cached);
+  const isFallback = Boolean(
+    data.fallback_mode_active ||
+    safety_assessment.fallback_mode_active ||
+    financial_assessment.fallback_mode_active ||
+    financial_assessment.cpm_result?.fallback_mode_active ||
+    tradeoff_reconciliation.fallback_mode_active
+  );
 
   const showToast = (msg: string) => {
     setToast(msg);
@@ -210,42 +225,61 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
     <div className="relative rounded-2xl border border-white/6 bg-white/[0.02] backdrop-blur-xl shadow-2xl overflow-hidden flex flex-col">
       {/* ── PERSISTENT TOP STEPPER NAVIGATION BAR ── */}
       <div className="border-b border-white/6 bg-white/[0.01] px-6 py-4">
-        <div className="flex items-center justify-between gap-2 max-w-4xl mx-auto">
-          {steps.map((step, idx) => {
-            const Icon = step.icon;
-            const isActive = activeStage === step.stage;
-            
-            return (
-              <React.Fragment key={step.stage}>
-                <button
-                  type="button"
-                  onClick={() => setActiveStage(step.stage as any)}
-                  className={cn(
-                    "flex flex-col sm:flex-row items-center gap-2.5 px-4 py-2.5 rounded-xl border transition-all text-left focus:outline-none cursor-pointer",
-                    isActive
-                      ? "border-sky-500 text-sky-400 bg-sky-500/10 shadow-[0_0_20px_-5px_rgba(56,189,248,0.15)] font-semibold"
-                      : "border-white/5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+        <div className="flex flex-col lg:flex-row items-center justify-between gap-4 max-w-6xl mx-auto">
+          {/* Stepper Buttons */}
+          <div className="flex items-center justify-between w-full lg:w-auto gap-2">
+            {steps.map((step, idx) => {
+              const Icon = step.icon;
+              const isActive = activeStage === step.stage;
+              
+              return (
+                <React.Fragment key={step.stage}>
+                  <button
+                    type="button"
+                    onClick={() => setActiveStage(step.stage as any)}
+                    className={cn(
+                      "flex flex-col sm:flex-row items-center gap-2.5 px-4 py-2.5 rounded-xl border transition-all text-left focus:outline-none cursor-pointer",
+                      isActive
+                        ? "border-sky-500 text-sky-400 bg-sky-500/10 shadow-[0_0_20px_-5px_rgba(56,189,248,0.15)] font-semibold"
+                        : "border-white/5 text-slate-400 hover:text-slate-200 hover:bg-slate-800/60"
+                    )}
+                  >
+                    <div className={cn(
+                      "flex items-center justify-center w-6 h-6 rounded-lg text-xs shrink-0",
+                      isActive
+                        ? "bg-sky-500/20 text-sky-400"
+                        : "bg-white/5 text-slate-500"
+                    )}>
+                      <Icon className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="text-center sm:text-left">
+                      <p className="text-[9px] uppercase tracking-widest opacity-60">Stage {step.stage}</p>
+                      <p className="text-xs font-bold hidden md:block leading-tight">{step.label}</p>
+                    </div>
+                  </button>
+                  {idx < steps.length - 1 && (
+                    <div className="hidden sm:block h-px flex-1 border-t border-dashed border-white/6 min-w-[12px]" />
                   )}
-                >
-                  <div className={cn(
-                    "flex items-center justify-center w-6 h-6 rounded-lg text-xs shrink-0",
-                    isActive
-                      ? "bg-sky-500/20 text-sky-400"
-                      : "bg-white/5 text-slate-500"
-                  )}>
-                    <Icon className="w-3.5 h-3.5" />
-                  </div>
-                  <div className="text-center sm:text-left">
-                    <p className="text-[9px] uppercase tracking-widest opacity-60">Stage {step.stage}</p>
-                    <p className="text-xs font-bold hidden md:block leading-tight">{step.label}</p>
-                  </div>
-                </button>
-                {idx < steps.length - 1 && (
-                  <div className="hidden sm:block h-px flex-1 border-t border-dashed border-white/6" />
-                )}
-              </React.Fragment>
-            );
-          })}
+                </React.Fragment>
+              );
+            })}
+          </div>
+
+          {/* System Status Indicators (Badges) */}
+          <div className="flex items-center gap-2 self-center lg:self-center shrink-0">
+            {isCached && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide bg-cyan-500/15 text-cyan-300 border border-cyan-500/30 shadow-[0_0_15px_-3px_rgba(6,182,212,0.3)] animate-in fade-in">
+                <Zap className="w-3.5 h-3.5 fill-cyan-400 text-cyan-400" />
+                ⚡ CACHED RESULT
+              </span>
+            )}
+            {isFallback && (
+              <span className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-bold tracking-wide bg-amber-500/15 text-amber-300 border border-amber-500/30 shadow-[0_0_15px_-3px_rgba(245,158,11,0.3)] animate-in fade-in">
+                <AlertTriangle className="w-3.5 h-3.5 text-amber-400" />
+                ⚠️ FALLBACK MODE ACTIVE
+              </span>
+            )}
+          </div>
         </div>
       </div>
 
@@ -255,6 +289,24 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
         {/* ── STAGE 1: OBSERVATION ── */}
         {activeStage === 1 && (
           <div className="space-y-6 animate-in fade-in slide-in-from-bottom-2 duration-300">
+            {/* Status Callout Banners */}
+            {isCached && (
+              <div className="flex items-start gap-3 rounded-xl border border-cyan-500/30 bg-cyan-500/10 p-3.5 text-xs text-cyan-200">
+                <Zap className="w-4 h-4 text-cyan-400 fill-cyan-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-cyan-300">Instant Exact-Match Cache:</span> This result was matched and served from the local SQLite query cache. Zero LLM API quota consumed.
+                </div>
+              </div>
+            )}
+            {isFallback && (
+              <div className="flex items-start gap-3 rounded-xl border border-amber-500/30 bg-amber-500/10 p-3.5 text-xs text-amber-200">
+                <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                <div>
+                  <span className="font-bold text-amber-300">Deterministic Fallback Mode Active:</span> Live AI quota rate limits or connectivity fallback engaged. Strict deterministic CPM math and safety rules are active.
+                </div>
+              </div>
+            )}
+
             <div>
               <p className="text-[10px] font-bold tracking-widest text-slate-500 uppercase">STAGE 1</p>
               <h2 className="text-2xl font-black text-slate-100">Observation & Intake</h2>

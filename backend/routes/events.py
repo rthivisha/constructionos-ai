@@ -5,6 +5,8 @@ import uuid
 import os
 import sqlite3
 import json
+import re
+import hashlib
 from typing import Optional
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
@@ -15,6 +17,7 @@ from backend.agents.finance_agent import assess_finance, simulate_delay_range, c
 from backend.agents.tradeoff_agent import assess_tradeoff
 from backend.tools.cpm_engine import propose_reschedule
 import backend.db
+from backend.db import get_cached_response, save_cached_response
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -29,6 +32,28 @@ class AttachmentPayload(BaseModel):
 class EventPayload(BaseModel):
     event_text: str
     attachment: Optional[AttachmentPayload] = None
+
+
+# ===========================================================================
+# Normalization & Safety Boundary
+# ===========================================================================
+# SAFETY BOUNDARY CONSTRAINT:
+# Only exact normalized-text matches (lowercase, trimmed, single whitespace,
+# SHA-256 hashed) will be cached and served from query_cache.
+# Fuzzy matching, approximate matching, or keyword similarity search are
+# strictly forbidden so that safety-critical compliance evaluations are never
+# served from an approximate match.
+# ===========================================================================
+
+def normalize_event_text(text: str) -> tuple[str, str]:
+    """
+    Normalizes event text by trimming, lowercasing, and collapsing whitespace,
+    then generates a SHA-256 hash.
+    """
+    clean_text = re.sub(r'\s+', ' ', text.strip().lower())
+    normalized_hash = hashlib.sha256(clean_text.encode('utf-8')).hexdigest()
+    return clean_text, normalized_hash
+
 
 @router.post("")
 async def process_site_event(payload: EventPayload):
@@ -99,6 +124,16 @@ async def process_site_event(payload: EventPayload):
             "url": f"/uploads/{unique_filename}",
             "content_type": payload.attachment.content_type
         }
+
+    # Normalize input text and check exact-match response cache
+    clean_text, normalized_hash = normalize_event_text(payload.event_text)
+    cached_response = get_cached_response(normalized_hash)
+    if cached_response is not None:
+        logger.info(f"Exact-match query_cache HIT for hash {normalized_hash[:10]}...")
+        cached_response["cached"] = True
+        if attachment_metadata:
+            cached_response["attachment"] = attachment_metadata
+        return cached_response
     
     # 1. Observation Stage (Extract events and task IDs)
     try:
@@ -111,6 +146,7 @@ async def process_site_event(payload: EventPayload):
             "task_id": None,
             "severity": None,
             "task_not_matched": True,
+            "fallback_mode_active": True,
             "parse_error": True
         }
 
@@ -132,7 +168,7 @@ async def process_site_event(payload: EventPayload):
             "plain_reason": f"Safety assessment unavailable: Agent crashed with error: {safety_res}",
             "override_risk": "",
             "exception_mitigation": "",
-            "fallback_mode_active": False,
+            "fallback_mode_active": True,
             "parse_error": False,
             "status": "unavailable"
         }
@@ -144,9 +180,11 @@ async def process_site_event(payload: EventPayload):
             "task_id": observe_output.get("task_id"),
             "delay_days_used": None,
             "delay_source": None,
+            "fallback_mode_active": True,
             "cpm_result": {
                 "parse_error": False,
-                "status": "unavailable"
+                "status": "unavailable",
+                "fallback_mode_active": True
             },
             "summary": f"Financial assessment unavailable: Agent crashed with error: {finance_res}"
         }
@@ -161,7 +199,8 @@ async def process_site_event(payload: EventPayload):
             "decision": "halt",
             "reasoning": f"Reconciliation pipeline error: Trade-off agent failed to execute: {e}",
             "rejected_alternative": "continue",
-            "rejected_because": "system orchestration pipeline failure, defaulting to a safe halt."
+            "rejected_because": "system orchestration pipeline failure, defaulting to a safe halt.",
+            "fallback_mode_active": True
         }
 
     # 5. Propose a reschedule if CPM produced a valid result (proposal only, no DB write)
@@ -220,7 +259,22 @@ async def process_site_event(payload: EventPayload):
     except Exception as e:
         logger.warning(f"simulate_delay_range failed (non-fatal): {e}")
 
-    # 8. Return aggregated pipeline execution output
+    # 8. Check overall fallback mode & errors
+    is_fallback = bool(
+        (isinstance(observe_output, dict) and observe_output.get("fallback_mode_active"))
+        or (isinstance(safety_res, dict) and safety_res.get("fallback_mode_active"))
+        or (isinstance(finance_res, dict) and finance_res.get("fallback_mode_active"))
+        or (isinstance(finance_res, dict) and finance_res.get("cpm_result", {}).get("fallback_mode_active"))
+        or (isinstance(tradeoff_res, dict) and tradeoff_res.get("fallback_mode_active"))
+    )
+
+    has_error = bool(
+        (isinstance(observe_output, dict) and observe_output.get("parse_error"))
+        or (isinstance(safety_res, dict) and (safety_res.get("parse_error") or safety_res.get("status") == "unavailable"))
+        or (isinstance(finance_res, dict) and (finance_res.get("status") in ("error", "unavailable") or finance_res.get("cpm_result", {}).get("parse_error")))
+    )
+
+    # 9. Return aggregated pipeline execution output
     response_dict = {
         "observation": observe_output,
         "safety_assessment": safety_res,
@@ -228,6 +282,8 @@ async def process_site_event(payload: EventPayload):
         "tradeoff_reconciliation": tradeoff_res,
         "proposed_reschedule": reschedule_proposal,
         "delay_simulation": delay_simulation,
+        "fallback_mode_active": is_fallback,
+        "cached": False
     }
     # Priority 3: avoided_loss must be entirely absent if propose_reschedule hasn't run
     if propose_reschedule_ran and avoided_loss_result is not None:
@@ -236,7 +292,17 @@ async def process_site_event(payload: EventPayload):
     if attachment_metadata:
         response_dict["attachment"] = attachment_metadata
 
-    # 9. Save to database (site_events table)
+    # 10. Cache Management (Exact-Match Storage)
+    # USER CONSTRAINT:
+    # Never cache a response where fallback_mode_active is true — only genuine live-Gemini successes
+    # should be written to query_cache. A degraded mock-mode answer must not get permanently served after quota recovers.
+    if not is_fallback and not has_error:
+        logger.info(f"Caching successful live-Gemini response for hash {normalized_hash[:10]}...")
+        save_cached_response(normalized_hash, payload.event_text, response_dict)
+    else:
+        logger.info(f"Skipping query_cache write: is_fallback={is_fallback}, has_error={has_error}")
+
+    # 11. Save to database audit log (site_events table)
     try:
         conn = sqlite3.connect(backend.db.DB_PATH)
         cursor = conn.cursor()
@@ -261,3 +327,4 @@ async def process_site_event(payload: EventPayload):
             conn.close()
 
     return response_dict
+

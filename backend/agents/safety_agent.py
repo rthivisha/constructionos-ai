@@ -5,7 +5,7 @@ from google import genai
 
 from backend.agents.observe_agent import get_api_key
 from backend.tools.cpm_engine import get_project_state
-from backend.config import MODEL_NAME, use_mock_llm
+from backend.config import MODEL_NAME, use_mock_llm, call_gemini_with_retry
 
 # Configure logging
 logger = logging.getLogger(__name__)
@@ -228,7 +228,7 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
     """
     Evaluates safety compliance by matching the event type against active regulatory rules.
     Issues a HARD_STOP if any matching rule is found.
-    In mock mode (USE_MOCK_LLM=true), returns deterministic results with no API calls.
+    In mock mode (USE_MOCK_LLM=true) or upon API failure, returns deterministic results with fallback_mode_active=True.
     Includes the 5-Tier Safety Filter output (safety_status, blocked_action, regulatory_rule_violated,
     violation_reason, mandatory_field_controls, counterfactual_analysis_target, suggested_compliant_alternatives).
     """
@@ -253,7 +253,7 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
             "exception_mitigation": "",
             "advisory_considerations": "",
             "advisory_disclaimer": _ADVISORY_DISCLAIMER,
-            "fallback_mode_active": False,
+            "fallback_mode_active": True,
             "parse_error": True
         }
 
@@ -261,7 +261,7 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
     severity = observe_output.get("severity")
 
     # 2. Load active regulatory knowledge base rules (always deterministic — never mocked)
-    state, fallback_mode = get_project_state()
+    state, state_fallback = get_project_state()
     rules = state.get("regulatory_kb", [])
 
     # 3. Match rules based on trigger condition (deterministic — never mocked)
@@ -300,7 +300,7 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
             "exception_mitigation": explanation["exception_mitigation"],
             "advisory_considerations": advisory_considerations,
             "advisory_disclaimer": _ADVISORY_DISCLAIMER,
-            "fallback_mode_active": fallback_mode,
+            "fallback_mode_active": True,
             "parse_error": False
         }
 
@@ -308,6 +308,7 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
     api_key = get_api_key()
     rules_json = json.dumps(triggered_rules)
     first_rule_code = triggered_rules[0]['code'] if triggered_rules else "(no rule triggered)"
+    agent_fallback = False
 
     if not api_key:
         logger.warning("GEMINI_API_KEY not configured. Safety Agent using offline fallback explanation.")
@@ -315,6 +316,7 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
         plain_reason = fallback_expl["plain_reason"]
         override_risk = fallback_expl["override_risk"]
         exception_mitigation = fallback_expl["exception_mitigation"]
+        agent_fallback = True
     else:
         client = genai.Client(api_key=api_key)
         prompt = f"""
@@ -338,22 +340,31 @@ Generate EXACTLY THREE fields as a JSON object with these keys:
 Return ONLY the JSON object, no other text.
 """
         try:
-            response = client.models.generate_content(model=MODEL_NAME, contents=prompt)
+            response = call_gemini_with_retry(
+                client=client,
+                model=MODEL_NAME,
+                contents=prompt,
+                max_retries=3,
+                initial_delay=1.0,
+                backoff_factor=2.0
+            )
             parsed = json.loads(response.text.strip())
             plain_reason = parsed.get("plain_reason", "")
             override_risk = parsed.get("override_risk", "")
             exception_mitigation = parsed.get("exception_mitigation", "")
         except Exception as e:
-            logger.error(f"Gemini structured explanation failed: {e}")
+            logger.error(f"Gemini structured explanation failed after retries: {e}")
             fallback_expl = _mock_structured_explanation(event_type, severity, hard_stop, triggered_rules)
             plain_reason = fallback_expl["plain_reason"]
             override_risk = fallback_expl["override_risk"]
             exception_mitigation = fallback_expl["exception_mitigation"]
+            agent_fallback = True
 
     # 5. Generate advisory considerations (best practices relevant to event category)
     advisory_considerations = ""
     if not api_key:
         advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
+        agent_fallback = True
     else:
         client = genai.Client(api_key=api_key)
         prompt_advisory = f"""
@@ -363,18 +374,25 @@ Include 2-3 specific safety recommendations for site supervisors (e.g. equipment
 Keep the advisory brief, professional, and structured as bullet points (under 80 words).
 """
         try:
-            res_advisory = client.models.generate_content(
+            res_advisory = call_gemini_with_retry(
+                client=client,
                 model=MODEL_NAME,
-                contents=prompt_advisory
+                contents=prompt_advisory,
+                max_retries=3,
+                initial_delay=1.0,
+                backoff_factor=2.0
             )
             advisory_considerations = res_advisory.text.strip()
         except Exception as e:
-            logger.error(f"Gemini advisory considerations generation failed: {e}")
+            logger.error(f"Gemini advisory considerations generation failed after retries: {e}")
             advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
+            agent_fallback = True
 
     tier5 = _generate_5tier_safety_filter(
         event_type, severity, hard_stop, triggered_rules, plain_reason
     )
+
+    fallback_active = agent_fallback or state_fallback or observe_output.get("fallback_mode_active", False)
 
     return {
         "hard_stop": hard_stop,
@@ -391,7 +409,8 @@ Keep the advisory brief, professional, and structured as bullet points (under 80
         "exception_mitigation": exception_mitigation,
         "advisory_considerations": advisory_considerations,
         "advisory_disclaimer": _ADVISORY_DISCLAIMER,
-        "fallback_mode_active": fallback_mode,
+        "fallback_mode_active": fallback_active,
         "parse_error": False
     }
+
 
