@@ -1,6 +1,7 @@
 // Fetch wrapper providing API communication with the FastAPI backend endpoint.
 
-const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const rawBaseUrl = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_BASE_URL = rawBaseUrl.replace(/\/+$/, '');
 
 async function handleResponse(response: Response) {
   if (!response.ok) {
