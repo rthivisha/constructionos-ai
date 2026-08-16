@@ -47,9 +47,11 @@ def seed_test_data():
     cursor.execute("INSERT INTO schedule_tasks (task_id, division_id, task_name, duration, is_critical_path, dependencies) VALUES (?, ?, ?, ?, ?, ?);",
                    ("T-102", "DIV-CIVIL", "Central Station Foundation Concreting", 15, 1, "T-101"))
     
-    # Seed regulatory KB matching only work_at_height
+    # Seed regulatory KB matching work_at_height and toxic_gas
     cursor.execute("INSERT INTO regulatory_kb (code, description, trigger_condition) VALUES (?, ?, ?);",
                    ("BOCW_SEC_40", "Safety harness and scaffolding mandatory.", EventType.WORK_AT_HEIGHT.value))
+    cursor.execute("INSERT INTO regulatory_kb (code, description, trigger_condition) VALUES (?, ?, ?);",
+                   ("FA_SEC_87", "Factories Act Section 87: Exposure to toxic gases or chemical handling requires PPE and continuous ventilation.", EventType.TOXIC_GAS.value))
     
     conn.commit()
     conn.close()
@@ -361,3 +363,40 @@ def test_safety_agent_5tier_filter_output():
         assert res["counterfactual_analysis_target"]["simulation_type"] == "COUNTERFACTUAL_EXPOSURE"
         assert res["counterfactual_analysis_target"]["action_to_simulate"] == res["blocked_action"]
         assert len(res["suggested_compliant_alternatives"]) >= 2
+
+
+def test_safety_agent_toxic_gas_hard_stop():
+    observe_output_toxic = {
+        "event_type": EventType.TOXIC_GAS.value,
+        "task_id": "T-104",
+        "severity": 8,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res = assess_safety(observe_output_toxic, "Strong chemical odor and dizziness near ventilation shaft.")
+        assert res["hard_stop"] is True
+        assert len(res["triggered_rules"]) == 1
+        assert res["triggered_rules"][0]["code"] == "FA_SEC_87"
+        assert res["safety_status"] == "BLOCKED"
+        assert res["blocked_action"] == "continue_confined_space_work"
+        assert "FA_SEC_87" in res["regulatory_rule_violated"]
+        assert "ventilation" in res["advisory_considerations"].lower() or "ppe" in res["advisory_considerations"].lower()
+
+
+def test_safety_agent_material_shortage_no_hard_stop():
+    observe_output_material = {
+        "event_type": EventType.MATERIAL_SHORTAGE.value,
+        "task_id": "T-104",
+        "severity": 2,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res = assess_safety(observe_output_material, "Minor electrical conduit supplier delivery delay.")
+        assert res["hard_stop"] is False
+        assert len(res["triggered_rules"]) == 0
+        assert res["safety_status"] == "CLEAR"
+        assert res["blocked_action"] == "none"
+        assert "procurement" in res["advisory_considerations"].lower() or "material" in res["advisory_considerations"].lower()
+

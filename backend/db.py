@@ -1,24 +1,156 @@
-import sqlite3
-import json
 import os
+import json
+import logging
+from typing import Optional, Dict, Any, List
+
+logger = logging.getLogger(__name__)
 
 DB_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "constructionos.db")
 SEED_PATH = os.path.join(os.path.dirname(os.path.abspath(__file__)), "mock_data", "seed_project_state.json")
 
+def get_database_url() -> Optional[str]:
+    """
+    Returns DATABASE_URL from environment or .env if set.
+    """
+    if "DATABASE_URL" in os.environ:
+        val = os.environ["DATABASE_URL"]
+        return val.strip() if val and val.strip() else None
+    
+    for dotenv_path in [
+        os.path.join(os.path.dirname(os.path.abspath(__file__)), ".env"),
+        os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), ".env"),
+        ".env"
+    ]:
+        if os.path.exists(dotenv_path):
+            try:
+                with open(dotenv_path, "r") as f:
+                    for line in f:
+                        s = line.strip()
+                        if s.startswith("DATABASE_URL="):
+                            val = s.split("=", 1)[1].strip().strip('"').strip("'")
+                            if val:
+                                return val
+            except Exception:
+                pass
+    return None
+
+def is_postgres() -> bool:
+    url = get_database_url()
+    return bool(url and (url.startswith("postgresql://") or url.startswith("postgres://")))
+
+
+class PostgresCursorWrapper:
+    def __init__(self, pg_cursor):
+        self._cursor = pg_cursor
+
+    def _translate_sql(self, sql: str) -> str:
+        # Translate '?' placeholders to '%s' for psycopg2
+        # Translate INSERT OR REPLACE to PostgreSQL ON CONFLICT syntax for query_cache
+        translated = sql.replace("?", "%s")
+        if "INSERT OR REPLACE INTO query_cache" in translated:
+            translated = (
+                "INSERT INTO query_cache (normalized_input_hash, original_input_text, full_pipeline_response) "
+                "VALUES (%s, %s, %s) "
+                "ON CONFLICT (normalized_input_hash) DO UPDATE SET "
+                "original_input_text = EXCLUDED.original_input_text, "
+                "full_pipeline_response = EXCLUDED.full_pipeline_response, "
+                "created_at = CURRENT_TIMESTAMP;"
+            )
+        elif "INSERT OR REPLACE INTO finance_calculations" in translated:
+            translated = (
+                "INSERT INTO finance_calculations (task_id, delay_days) "
+                "VALUES (%s, %s) "
+                "ON CONFLICT (task_id, delay_days) DO NOTHING;"
+            )
+        return translated
+
+    def execute(self, sql: str, params=None):
+        translated = self._translate_sql(sql)
+        if params is not None:
+            return self._cursor.execute(translated, params)
+        return self._cursor.execute(translated)
+
+    def executemany(self, sql: str, seq_of_params):
+        translated = self._translate_sql(sql)
+        return self._cursor.executemany(translated, seq_of_params)
+
+    def fetchone(self):
+        row = self._cursor.fetchone()
+        if row is None:
+            return None
+        return dict(row)
+
+    def fetchall(self):
+        rows = self._cursor.fetchall()
+        return [dict(r) for r in rows]
+
+    @property
+    def rowcount(self):
+        return self._cursor.rowcount
+
+    def close(self):
+        self._cursor.close()
+
+
+class PostgresConnectionWrapper:
+    def __init__(self, pg_conn):
+        self._conn = pg_conn
+
+    def cursor(self):
+        import psycopg2.extras
+        pg_cursor = self._conn.cursor(cursor_factory=psycopg2.extras.RealDictCursor)
+        return PostgresCursorWrapper(pg_cursor)
+
+    def commit(self):
+        self._conn.commit()
+
+    def rollback(self):
+        self._conn.rollback()
+
+    def close(self):
+        self._conn.close()
+
+    def execute(self, sql: str, params=None):
+        cur = self.cursor()
+        cur.execute(sql, params)
+        return cur
+
+
 def get_db_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON;")
-    conn.row_factory = sqlite3.Row
-    return conn
+    """
+    Returns a unified connection object supporting cursor(), commit(), rollback(), close().
+    If DATABASE_URL is set (e.g. Supabase / PostgreSQL), connects to PostgreSQL.
+    Otherwise, connects to SQLite (backend/constructionos.db).
+    """
+    db_url = get_database_url()
+    if db_url and is_postgres():
+        import psycopg2
+        pg_conn = psycopg2.connect(db_url)
+        return PostgresConnectionWrapper(pg_conn)
+    else:
+        import sqlite3
+        conn = sqlite3.connect(DB_PATH)
+        conn.execute("PRAGMA foreign_keys = ON;")
+        conn.row_factory = sqlite3.Row
+        return conn
+
 
 def init_db():
+    """
+    Initializes database tables and seeds mock state if project_meta is empty.
+    Compatible with both PostgreSQL and SQLite.
+    """
     conn = get_db_connection()
     cursor = conn.cursor()
 
+    is_pg = is_postgres()
+    auto_id_type = "SERIAL PRIMARY KEY" if is_pg else "INTEGER PRIMARY KEY AUTOINCREMENT"
+    timestamp_type = "TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP" if is_pg else "DATETIME DEFAULT CURRENT_TIMESTAMP"
+
     # Create tables
-    cursor.execute("""
+    cursor.execute(f"""
     CREATE TABLE IF NOT EXISTS project_meta (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id {auto_id_type},
         name TEXT NOT NULL,
         location TEXT NOT NULL,
         total_budget REAL NOT NULL,
@@ -40,8 +172,7 @@ def init_db():
     CREATE TABLE IF NOT EXISTS divisions (
         id TEXT PRIMARY KEY,
         name TEXT NOT NULL,
-        lead_contractor TEXT NOT NULL,
-        FOREIGN KEY(lead_contractor) REFERENCES contractors(name) ON UPDATE CASCADE ON DELETE RESTRICT
+        lead_contractor TEXT NOT NULL REFERENCES contractors(name) ON UPDATE CASCADE ON DELETE RESTRICT
     );
     """)
 
@@ -56,50 +187,52 @@ def init_db():
     cursor.execute("""
     CREATE TABLE IF NOT EXISTS schedule_tasks (
         task_id TEXT PRIMARY KEY,
-        division_id TEXT NOT NULL,
+        division_id TEXT NOT NULL REFERENCES divisions(id) ON UPDATE CASCADE ON DELETE RESTRICT,
         task_name TEXT NOT NULL,
         duration INTEGER NOT NULL,
         is_critical_path INTEGER NOT NULL,
-        dependencies TEXT NOT NULL,
-        FOREIGN KEY(division_id) REFERENCES divisions(id) ON UPDATE CASCADE ON DELETE RESTRICT
+        dependencies TEXT NOT NULL
     );
     """)
 
-    cursor.execute("""
+    cursor.execute(f"""
     CREATE TABLE IF NOT EXISTS finance_calculations (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id {auto_id_type},
         task_id TEXT NOT NULL,
         delay_days INTEGER NOT NULL,
         UNIQUE(task_id, delay_days)
     );
     """)
 
-    cursor.execute("""
+    cursor.execute(f"""
     CREATE TABLE IF NOT EXISTS site_events (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        id {auto_id_type},
         event_text TEXT NOT NULL,
         filename TEXT,
         file_path TEXT,
         content_type TEXT,
         pipeline_response TEXT,
-        timestamp DATETIME DEFAULT CURRENT_TIMESTAMP
+        timestamp {timestamp_type}
     );
     """)
 
-    cursor.execute("""
+    cursor.execute(f"""
     CREATE TABLE IF NOT EXISTS query_cache (
         normalized_input_hash TEXT PRIMARY KEY,
         original_input_text TEXT NOT NULL,
         full_pipeline_response TEXT NOT NULL,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        created_at {timestamp_type}
     );
     """)
 
     conn.commit()
 
     # Check if project_meta is empty -> Seed the database
-    cursor.execute("SELECT COUNT(*) FROM project_meta;")
-    if cursor.fetchone()[0] == 0:
+    cursor.execute("SELECT COUNT(*) as count FROM project_meta;")
+    row = cursor.fetchone()
+    count = row["count"] if isinstance(row, dict) else row[0]
+    
+    if count == 0:
         if os.path.exists(SEED_PATH):
             with open(SEED_PATH, "r") as f:
                 seed_data = json.load(f)
@@ -141,15 +274,16 @@ def init_db():
                     )
 
                 conn.commit()
-                print("Database successfully seeded from seed_project_state.json")
+                logger.info("Database successfully seeded from seed_project_state.json")
             except Exception as e:
                 conn.rollback()
-                print(f"Error seeding database: {e}")
+                logger.error(f"Error seeding database: {e}")
                 raise e
         else:
-            print(f"Seed file not found at {SEED_PATH}")
+            logger.warning(f"Seed file not found at {SEED_PATH}")
     
     conn.close()
+
 
 # ===========================================================================
 # Query Response Cache Helper Functions
@@ -162,7 +296,7 @@ def init_db():
 # served from an approximate match.
 # ===========================================================================
 
-def get_cached_response(normalized_hash: str):
+def get_cached_response(normalized_hash: str) -> Optional[Dict[str, Any]]:
     """
     Retrieves a cached full pipeline response by exact normalized SHA-256 hash.
     Returns parsed dictionary or None if cache miss.
@@ -176,13 +310,15 @@ def get_cached_response(normalized_hash: str):
         )
         row = cursor.fetchone()
         if row:
-            return json.loads(row["full_pipeline_response"])
+            resp_str = row["full_pipeline_response"] if isinstance(row, dict) else row[0]
+            return json.loads(resp_str)
         return None
     except Exception as e:
-        print(f"Warning: Failed to retrieve cached query response: {e}")
+        logger.warning(f"Failed to retrieve cached query response: {e}")
         return None
     finally:
         conn.close()
+
 
 def save_cached_response(normalized_hash: str, original_text: str, response: dict):
     """
@@ -202,10 +338,11 @@ def save_cached_response(normalized_hash: str, original_text: str, response: dic
         )
         conn.commit()
     except Exception as e:
-        print(f"Warning: Failed to save query response to cache: {e}")
+        logger.warning(f"Failed to save query response to cache: {e}")
         conn.rollback()
     finally:
         conn.close()
+
 
 def clear_query_cache() -> int:
     """
@@ -219,15 +356,15 @@ def clear_query_cache() -> int:
         cursor.execute("DELETE FROM query_cache;")
         deleted_count = cursor.rowcount
         conn.commit()
-        print(f"[CACHE INVALIDATION] Cleared query_cache table ({deleted_count} rows removed).")
+        logger.info(f"[CACHE INVALIDATION] Cleared query_cache table ({deleted_count} rows removed).")
         return deleted_count
     except Exception as e:
-        print(f"Warning: Failed to clear query_cache: {e}")
+        logger.warning(f"Failed to clear query_cache: {e}")
         conn.rollback()
         return 0
     finally:
         conn.close()
 
+
 if __name__ == "__main__":
     init_db()
-

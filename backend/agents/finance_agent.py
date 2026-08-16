@@ -38,49 +38,41 @@ class DelayExtractionSchema(BaseModel):
 
 def _get_or_create_calculation_id(task_id: str, delay_days: int) -> str:
     """
-    Returns a sequential integer calculation ID starting with FIN-, persisted in SQLite.
+    Returns a sequential integer calculation ID starting with FIN-, persisted in the database.
     If the DB is not found or fails, falls back to a stable in-memory cache for idempotency.
     """
-    db_path = getattr(backend.db, "DB_PATH", None)
-    if db_path and os.path.exists(db_path):
-        try:
-            conn = sqlite3.connect(db_path)
-            cursor = conn.cursor()
-            cursor.execute("""
-            CREATE TABLE IF NOT EXISTS finance_calculations (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                task_id TEXT NOT NULL,
-                delay_days INTEGER NOT NULL,
-                UNIQUE(task_id, delay_days)
-            );
-            """)
-            # Query first to avoid autoincrement leaks on INSERT conflicts
-            cursor.execute(
-                "SELECT id FROM finance_calculations WHERE task_id = ? AND delay_days = ?;",
-                (task_id, delay_days)
-            )
-            row = cursor.fetchone()
-            if row:
-                conn.close()
-                return f"FIN-{row[0]}"
-
-            # Insert if not exists
-            cursor.execute(
-                "INSERT INTO finance_calculations (task_id, delay_days) VALUES (?, ?);",
-                (task_id, delay_days)
-            )
-            conn.commit()
-            
-            cursor.execute(
-                "SELECT id FROM finance_calculations WHERE task_id = ? AND delay_days = ?;",
-                (task_id, delay_days)
-            )
-            row = cursor.fetchone()
+    try:
+        conn = backend.db.get_db_connection()
+        cursor = conn.cursor()
+        # Query first
+        cursor.execute(
+            "SELECT id FROM finance_calculations WHERE task_id = ? AND delay_days = ?;",
+            (task_id, delay_days)
+        )
+        row = cursor.fetchone()
+        if row:
+            cid = row["id"] if isinstance(row, dict) else row[0]
             conn.close()
-            if row:
-                return f"FIN-{row[0]}"
-        except Exception as e:
-            logger.warning(f"Error checking sequential calculation ID in database: {e}")
+            return f"FIN-{cid}"
+
+        # Insert if not exists
+        cursor.execute(
+            "INSERT INTO finance_calculations (task_id, delay_days) VALUES (?, ?);",
+            (task_id, delay_days)
+        )
+        conn.commit()
+        
+        cursor.execute(
+            "SELECT id FROM finance_calculations WHERE task_id = ? AND delay_days = ?;",
+            (task_id, delay_days)
+        )
+        row = cursor.fetchone()
+        conn.close()
+        if row:
+            cid = row["id"] if isinstance(row, dict) else row[0]
+            return f"FIN-{cid}"
+    except Exception as e:
+        logger.warning(f"Error checking sequential calculation ID in database: {e}")
 
     # Fallback to local cache
     if not hasattr(_get_or_create_calculation_id, "_fallback_seq_ids"):

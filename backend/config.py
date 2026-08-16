@@ -1,5 +1,6 @@
 import os
 import time
+import re
 import logging
 
 logger = logging.getLogger(__name__)
@@ -55,11 +56,21 @@ def call_gemini_with_retry(
         except Exception as e:
             last_exception = e
             if is_rate_limit_error(e) and attempt < max_retries:
+                err_str = str(e)
+                wait_time = delay
+                retry_match = re.search(r"retry in (\d+(?:\.\d+)?)s", err_str, re.IGNORECASE)
+                if retry_match:
+                    wait_time = max(float(retry_match.group(1)) + 0.5, delay)
+                else:
+                    delay_match = re.search(r"['\"]retryDelay['\"]:\s*['\"](\d+)s['\"]", err_str)
+                    if delay_match:
+                        wait_time = max(float(delay_match.group(1)) + 0.5, delay)
+                
                 logger.warning(
                     f"Gemini API rate limit (429/RESOURCE_EXHAUSTED) hit on attempt {attempt}/{max_retries}. "
-                    f"Retrying in {delay:.1f}s... Details: {e}"
+                    f"Retrying in {wait_time:.1f}s... Details: {e}"
                 )
-                time.sleep(delay)
+                time.sleep(wait_time)
                 delay *= backoff_factor
             else:
                 logger.error(f"Gemini API call failed on attempt {attempt}/{max_retries}: {e}")

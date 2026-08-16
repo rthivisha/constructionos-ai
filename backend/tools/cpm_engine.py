@@ -22,7 +22,7 @@ SEED_PATH = os.path.join(BACKEND_DIR, "mock_data", "seed_project_state.json")
 
 def get_project_state() -> Tuple[Dict[str, Any], bool]:
     """
-    Retrieves the project state from the SQLite database.
+    Retrieves the project state from the database (PostgreSQL / SQLite).
     If the database is missing, empty, or fails to connect,
     it falls back to seed_project_state.json and logs/prints a visible warning.
     
@@ -30,46 +30,32 @@ def get_project_state() -> Tuple[Dict[str, Any], bool]:
         Tuple[project_state_dict, fallback_mode_active]
     """
     fallback_mode_active = False
-    db_ok = False
 
-    # Check if database exists and has tasks
-    if os.path.exists(backend.db.DB_PATH):
-        try:
-            conn = sqlite3.connect(backend.db.DB_PATH)
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
-            # Simple check to see if database has tables and rows
-            cursor.execute("SELECT COUNT(*) FROM schedule_tasks;")
-            count = cursor.fetchone()[0]
-            if count > 0:
-                db_ok = True
-            conn.close()
-        except Exception:
-            db_ok = False
-
-    if db_ok:
-        try:
-            conn = sqlite3.connect(backend.db.DB_PATH)
-
-            conn.row_factory = sqlite3.Row
-            cursor = conn.cursor()
-            
+    try:
+        conn = backend.db.get_db_connection()
+        cursor = conn.cursor()
+        
+        # Check if database has tasks
+        cursor.execute("SELECT COUNT(*) as count FROM schedule_tasks;")
+        row = cursor.fetchone()
+        count = row["count"] if isinstance(row, dict) else row[0]
+        
+        if count > 0:
             # Fetch tasks
             cursor.execute("SELECT task_id, division_id, task_name, duration, is_critical_path, dependencies FROM schedule_tasks;")
-            tasks = [dict(row) for row in cursor.fetchall()]
+            tasks = [dict(r) for r in cursor.fetchall()]
             
             # Fetch divisions
             cursor.execute("SELECT id, name, lead_contractor FROM divisions;")
-            divisions = [dict(row) for row in cursor.fetchall()]
+            divisions = [dict(r) for r in cursor.fetchall()]
             
             # Fetch contractors
             cursor.execute("SELECT name, scope, daily_operating_cost, daily_delay_penalty, active_workers FROM contractors;")
-            contractors = [dict(row) for row in cursor.fetchall()]
+            contractors = [dict(r) for r in cursor.fetchall()]
             
             # Fetch regulatory rules
             cursor.execute("SELECT code, description, trigger_condition FROM regulatory_kb;")
-            regulatory_kb = [dict(row) for row in cursor.fetchall()]
+            regulatory_kb = [dict(r) for r in cursor.fetchall()]
             
             conn.close()
             return {
@@ -78,15 +64,14 @@ def get_project_state() -> Tuple[Dict[str, Any], bool]:
                 "contractors": contractors,
                 "regulatory_kb": regulatory_kb
             }, False
-
-        except Exception as e:
-            logger.warning(f"Error querying SQLite database: {e}. Falling back to JSON.")
-            db_ok = False
+        conn.close()
+    except Exception as e:
+        logger.warning(f"Error querying database: {e}. Falling back to JSON.")
 
     # Fallback to seed_project_state.json
     fallback_mode_active = True
     warning_msg = (
-        "WARNING: SQLite database not found or empty. Falling back to seed_project_state.json. "
+        "WARNING: Database not accessible or empty. Falling back to seed_project_state.json. "
         "Live edits from the setup page will be ignored!"
     )
     print(warning_msg)

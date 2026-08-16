@@ -56,9 +56,11 @@ def seed_test_data():
     cursor.execute("INSERT INTO schedule_tasks (task_id, division_id, task_name, duration, is_critical_path, dependencies) VALUES (?, ?, ?, ?, ?, ?);",
                    ("T-103", "DIV-C", "South Ramp Drainage Excavation", 8, 0, "T-102"))
     
-    # Seed regulatory rule matching WORK_AT_HEIGHT
+    # Seed regulatory rules matching WORK_AT_HEIGHT and TOXIC_GAS
     cursor.execute("INSERT INTO regulatory_kb (code, description, trigger_condition) VALUES (?, ?, ?);",
                    ("BOCW_SEC_40", "Safety harness and scaffolding mandatory.", EventType.WORK_AT_HEIGHT.value))
+    cursor.execute("INSERT INTO regulatory_kb (code, description, trigger_condition) VALUES (?, ?, ?);",
+                   ("FA_SEC_87", "Factories Act Section 87: Exposure to toxic gases or chemical handling requires PPE and continuous ventilation.", EventType.TOXIC_GAS.value))
     
     conn.commit()
     conn.close()
@@ -307,6 +309,66 @@ def test_pipeline_e2e_integration_no_mocked_dicts(mock_client_class, monkeypatch
     assert data["tradeoff_reconciliation"]["rejected_alternative"] == "halt"
 
 
+@patch('google.genai.Client')
+def test_pipeline_e2e_toxic_gas_hard_stop(mock_client_class, monkeypatch):
+    monkeypatch.setenv("USE_MOCK_LLM", "false")
+    monkeypatch.setenv("GEMINI_API_KEY", "dummy-key-for-test")
+    mock_client = MagicMock()
+    mock_client_class.return_value = mock_client
+    
+    def generate_content_side_effect(model, contents, config=None, **kwargs):
+        prompt = str(contents)
+        if "matched_task_id" in prompt or "extract structured fields" in prompt:
+            return MockResponse(json.dumps({
+                "event_type": "toxic_gas",
+                "matched_task_id": "T-102",
+                "severity": 8
+            }))
+        elif "FIXED FACTS" in prompt or "Safety Agent" in prompt:
+            return MockResponse(json.dumps({
+                "plain_reason": "Toxic gas detection requires immediate evacuation under FA_SEC_87.",
+                "override_risk": "Continuing risks severe respiratory poisoning under FA_SEC_87.",
+                "exception_mitigation": "NOT COMPLIANCE — emergency exception steps only: (1) Safety sign-off."
+            }))
+        elif "construction-safety best-practice notes" in prompt or "advisory" in prompt:
+            return MockResponse("- Test air quality.\n- Ensure positive pressure ventilation.")
+        elif "extract the number of delay days" in prompt:
+            return MockResponse(json.dumps({
+                "delay_days": 3
+            }))
+        elif "financial impact brief" in prompt or "financial summary brief" in prompt:
+            return MockResponse("Financial impact analysis for 3 days halt on T-102.")
+        elif "Trade-off Agent" in prompt or "decision" in prompt:
+            return MockResponse(json.dumps({
+                "decision": "halt",
+                "reasoning": "Mandatory safety hard stop triggered under FA_SEC_87.",
+                "rejected_alternative": "continue",
+                "rejected_because": "safety hard stop is non-negotiable."
+            }))
+        else:
+            return MockResponse("Mock response")
+
+    mock_client.models.generate_content.side_effect = generate_content_side_effect
+    
+    response = client.post("/api/events", json={
+        "event_text": "Workers report a strong chemical odor and mild dizziness near the ventilation shaft, work area not yet cleared."
+    })
+    assert response.status_code == 200
+    
+    data = response.json()
+    assert data["observation"]["event_type"] == "toxic_gas"
+    assert data["observation"]["task_id"] == "T-102"
+    assert data["observation"]["severity"] == 8
+    
+    assert data["safety_assessment"]["hard_stop"] is True
+    assert len(data["safety_assessment"]["triggered_rules"]) == 1
+    assert data["safety_assessment"]["triggered_rules"][0]["code"] == "FA_SEC_87"
+    assert data["safety_assessment"]["safety_status"] == "BLOCKED"
+    
+    assert data["tradeoff_reconciliation"]["decision"] == "halt"
+    assert data["tradeoff_reconciliation"]["rejected_alternative"] == "continue"
+
+
 @patch('backend.routes.events.observe_event')
 @patch('backend.routes.events.assess_safety')
 @patch('backend.routes.events.assess_finance')
@@ -485,14 +547,16 @@ def test_pipeline_attachment_path_traversal_and_db_persistence(mock_tradeoff, mo
     assert os.path.dirname(saved_file_path) == uploads_dir
 
     # Verify site_events DB table persistence
-    conn = sqlite3.connect(backend.db.DB_PATH)
+    conn = backend.db.get_db_connection()
     cursor = conn.cursor()
     cursor.execute("SELECT filename, file_path, pipeline_response FROM site_events ORDER BY id DESC LIMIT 1;")
     db_row = cursor.fetchone()
     conn.close()
 
     assert db_row is not None
-    db_filename, db_file_path, db_pipeline_response = db_row
+    db_filename = db_row["filename"] if isinstance(db_row, dict) else db_row[0]
+    db_file_path = db_row["file_path"] if isinstance(db_row, dict) else db_row[1]
+    db_pipeline_response = db_row["pipeline_response"] if isinstance(db_row, dict) else db_row[2]
     assert db_filename == "passwd_test.png"
     assert db_file_path.startswith("/uploads/")
     

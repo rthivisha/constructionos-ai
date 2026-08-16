@@ -14,7 +14,7 @@ def execute_bulk_update(table_name: str, query: str, rows: list):
         cursor.execute(f"DELETE FROM {table_name};")
         cursor.executemany(query, rows)
         conn.commit()
-    except sqlite3.Error as e:
+    except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Database write failure: {e}")
     finally:
@@ -80,7 +80,7 @@ def update_project_meta(meta: ProjectMeta):
         # Invalidate query cache
         clear_query_cache()
         return {"status": "success", "message": "Metadata updated successfully"}
-    except sqlite3.Error as e:
+    except Exception as e:
         conn.rollback()
         raise HTTPException(status_code=500, detail=f"Database failure: {e}")
     finally:

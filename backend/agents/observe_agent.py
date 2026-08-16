@@ -65,7 +65,8 @@ def _mock_observe(event_text: str) -> Dict[str, Any]:
     Scenario 1 — Crane Failure (T-101):   work_at_height, severity 8
     Scenario 2 — Heavy Weather (T-103):   extreme_weather, severity 6
     Scenario 3 — Ambiguous Input:         excavation, task_not_matched=True, severity 3
-    Scenario 4 — Minor Material Delay (T-104): toxic_gas category (no KB rule), severity 2, non-critical task
+    Scenario 4 — Material Delivery Delay (T-104): material_shortage category (no KB rule), severity 2, non-critical task
+    Scenario 5 — Toxic Gas Incident (T-104): toxic_gas category (FA_SEC_87 rule), severity 8
     """
     text = event_text.lower()
 
@@ -93,12 +94,23 @@ def _mock_observe(event_text: str) -> Dict[str, Any]:
             "parse_error": False
         }
 
-    # Scenario 4: Minor Material Delay (T-104) — toxic_gas category (no KB rule), non-critical
-    # Matched before ambiguous so specific keywords win
-    if any(w in text for w in ["conduit", "electrical", "material", "delivery", "ventilation", "minor", "supply"]):
-        logger.info("[MOCK] Observe Agent -> minor material delay scenario (T-104, no KB rule)")
+    # Scenario 5: Toxic Gas Incident (FA_SEC_87 / chemical odor / dizziness) — toxic_gas, hard_stop=True
+    if any(w in text for w in ["chemical", "odor", "gas", "toxic", "fumes", "dizziness", "ventilation shaft"]):
+        logger.info("[MOCK] Observe Agent -> toxic gas scenario (T-104, FA_SEC_87)")
         return {
             "event_type": "toxic_gas",
+            "task_id": "T-104",
+            "severity": 8,
+            "task_not_matched": False,
+            "fallback_mode_active": True,
+            "parse_error": False
+        }
+
+    # Scenario 4: Material Delivery Delay (T-104) — material_shortage (no KB rule), non-critical
+    if any(w in text for w in ["conduit", "electrical", "material", "delivery", "supplier", "backlog", "shortage"]):
+        logger.info("[MOCK] Observe Agent -> material shortage scenario (T-104, no KB rule)")
+        return {
+            "event_type": "material_shortage",
             "task_id": "T-104",
             "severity": 2,
             "task_not_matched": False,
@@ -147,8 +159,9 @@ Here is the list of available tasks currently active on the site:
 Please categorize the event into one of the EventType enum values:
 - "excavation": covers excavation, digging, shoring, side slumping, structural foundation, mud, trenching.
 - "work_at_height": covers height, scaffolding, falls, roof work, ladders, harness safety.
-- "toxic_gas": covers gas leaks, carbon monoxide, ventilation, chemical fumes, PPE breathing.
+- "toxic_gas": covers gas leaks, chemical odor, dizziness, fumes, toxic atmosphere, PPE breathing.
 - "extreme_weather": covers high wind, heavy rain, monsoon, heat waves, temperature stops.
+- "material_shortage": covers supply delays, delivery backlogs, material shortages, non-safety supply issues.
 
 Match the event to the correct 'matched_task_id' from the list above.
 CRITICAL INSTRUCTIONS FOR TASK ID MATCHING:

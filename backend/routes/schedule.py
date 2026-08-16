@@ -1,4 +1,4 @@
-﻿"""
+"""
 POST /api/schedule/apply-reschedule
 
 Persists a proposed reschedule to the schedule_tasks table in the database.
@@ -44,8 +44,7 @@ def apply_reschedule(payload: ApplyReschedulePayload):
     if not payload.proposed_reschedule:
         raise HTTPException(status_code=400, detail="proposed_reschedule list is empty — nothing to apply.")
 
-    conn = sqlite3.connect(backend.db.DB_PATH)
-    conn.execute("PRAGMA foreign_keys = ON;")
+    conn = backend.db.get_db_connection()
     cursor = conn.cursor()
 
     applied = []
@@ -65,7 +64,9 @@ def apply_reschedule(payload: ApplyReschedulePayload):
                     detail=f"Task '{entry.task_id}' not found in schedule_tasks — aborting apply."
                 )
 
-            task_id, task_name, current_duration = row
+            task_id = row["task_id"] if isinstance(row, dict) else row[0]
+            task_name = row["task_name"] if isinstance(row, dict) else row[1]
+            current_duration = row["duration"] if isinstance(row, dict) else row[2]
             new_duration = current_duration + entry.days_absorbed
 
             cursor.execute(

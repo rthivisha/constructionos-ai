@@ -14,8 +14,9 @@ from backend.db import init_db
 from backend.tools.cpm_engine import get_task_impact, recalculate_schedule, get_project_state
 
 @pytest.fixture(autouse=True)
-def setup_test_db():
-    backend.db.DB_PATH = TEST_DB_PATH
+def setup_test_db(monkeypatch):
+    monkeypatch.setattr(backend.db, "DB_PATH", TEST_DB_PATH)
+    monkeypatch.setenv("DATABASE_URL", "")
     # Fresh database initialization before each test
     if os.path.exists(TEST_DB_PATH):
         try:

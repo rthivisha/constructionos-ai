@@ -194,4 +194,45 @@ def test_observe_event_malformed_or_invalid_gemini_response(mock_genai_client_cl
     assert result_invalid["event_type"] is not None
 
 
+@patch('backend.agents.observe_agent.genai.Client')
+def test_observe_event_toxic_gas_success(mock_genai_client_class):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+    
+    mock_client.models.generate_content.return_value = MockResponse(
+        json.dumps({
+            "event_type": "toxic_gas",
+            "matched_task_id": "T-101",
+            "severity": 8
+        })
+    )
+    
+    result = observe_event("Chemical fumes and dizziness reported near ventilation shaft.")
+    assert result["event_type"] == EventType.TOXIC_GAS.value
+    assert result["task_id"] == "T-101"
+    assert result["severity"] == 8
+    assert result["task_not_matched"] is False
+
+
+@patch('backend.agents.observe_agent.genai.Client')
+def test_observe_event_material_shortage_success(mock_genai_client_class):
+    mock_client = MagicMock()
+    mock_genai_client_class.return_value = mock_client
+    
+    mock_client.models.generate_content.return_value = MockResponse(
+        json.dumps({
+            "event_type": "material_shortage",
+            "matched_task_id": "T-101",
+            "severity": 2
+        })
+    )
+    
+    result = observe_event("Material supplier backlog delayed electrical conduit delivery.")
+    assert result["event_type"] == EventType.MATERIAL_SHORTAGE.value
+    assert result["task_id"] == "T-101"
+    assert result["severity"] == 2
+    assert result["task_not_matched"] is False
+
+
+
 

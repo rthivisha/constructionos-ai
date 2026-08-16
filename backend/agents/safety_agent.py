@@ -103,6 +103,11 @@ _MOCK_ADVISORIES: Dict[str, str] = {
         "- Ensure all personnel have functioning PPE (respirators, gloves) available on-site.\n"
         "- Log the incident in the site safety diary and notify the site safety officer immediately."
     ),
+    "material_shortage": (
+        "- Coordinate with procurement to track replacement material shipments and delivery ETA.\n"
+        "- Verify storage and staging areas are prepared for incoming consignments.\n"
+        "- Resequence non-dependent tasks to maintain worker productivity."
+    ),
 }
 _DEFAULT_ADVISORY = (
     "- Follow standard job safety analysis procedures.\n"

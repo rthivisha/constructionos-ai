@@ -12,8 +12,10 @@ scenarios = [
      'Heavy monsoon weather warning issued for the site. Strong winds and heavy rainfall expected over the next 48 hours, affecting all open-site operations.'),
     ('SCENARIO 3 — Ambiguous Input (excavation, task_not_matched, HALT)',
      'There was some kind of incident on site today. Something happened near one of the work areas but details are unclear.'),
-    ('SCENARIO 4 — Minor Material Delay (T-104, hard_stop=FALSE, CONTINUE)',
-     'Minor electrical conduit material delivery delayed by one day due to supplier backlog. Ventilation on site is slightly reduced but within safe limits. T-104 is not on critical path.'),
+    ('SCENARIO 4 — Material Delivery Delay (T-104, hard_stop=FALSE, CONTINUE)',
+     'Minor electrical conduit material delivery delayed by one day due to supplier backlog. Work area is completely safe with no hazards. T-104 is not on critical path.'),
+    ('SCENARIO 5 — Toxic Gas & Ventilation Incident (T-104, hard_stop=TRUE, HALT)',
+     'Workers report a strong chemical odor and mild dizziness near the ventilation shaft during electrical conduit installation, work area not yet cleared.'),
 ]
 
 def main():

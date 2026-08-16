@@ -304,7 +304,7 @@ async def process_site_event(payload: EventPayload):
 
     # 11. Save to database audit log (site_events table)
     try:
-        conn = sqlite3.connect(backend.db.DB_PATH)
+        conn = backend.db.get_db_connection()
         cursor = conn.cursor()
         cursor.execute(
             """
@@ -323,7 +323,7 @@ async def process_site_event(payload: EventPayload):
     except Exception as db_err:
         logger.error(f"Failed to record site event in database: {db_err}")
     finally:
-        if 'conn' in locals():
+        if 'conn' in locals() and conn:
             conn.close()
 
     return response_dict
