@@ -280,51 +280,6 @@ All tests pass deterministically using hardcoded demo scenarios. Perfect for CI/
 
 ---
 
-## 📊 Production Deployment
-
-### Docker Setup
-
-```bash
-docker-compose up -d  # PostgreSQL + Redis
-docker build -t constructionos-backend .
-docker run -p 8000:8000 constructionos-backend
-```
-
-### Environment Variables (.env)
-
-```env
-# API Keys
-GEMINI_API_KEY=your_gemini_api_key_here
-
-# Database
-DATABASE_URL=postgresql://user:password@localhost:5432/constructionos
-# Or leave empty for SQLite
-
-# LLM Mode
-USE_MOCK_LLM=false  # Set to true for deterministic testing
-
-# CORS
-ALLOWED_ORIGINS=https://yourdomain.com,https://app.yourdomain.com
-
-# Model Selection
-MODEL_NAME=gemini-3.5-flash-lite
-```
-
-### Deploy to Vercel (Frontend)
-
-```bash
-cd frontend
-vercel deploy
-```
-
-### Deploy to Render (Backend)
-
-```
-1. Connect GitHub repo
-2. Set environment variables in Render dashboard
-3. Deploy from main branch
-```
-
 ---
 
 ## 🔒 Safety-Critical Features
@@ -445,7 +400,7 @@ ConstructionOS demonstrates end-to-end ownership: from agent design → backend 
 ## 📞 Get in Touch
 
 - **GitHub:** [@rthivisha](https://github.com/rthivisha)
-- **Email:** [your.email@example.com](mailto:your.email@example.com)
+- **Email:** [your.email@example.com](mailto:your.rthivisha67@example.com)
 - **LinkedIn:** [linkedin.com/in/thivisha](https://linkedin.com/in/thivisha)
 
 ---
