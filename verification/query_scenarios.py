@@ -32,11 +32,12 @@ def main():
             if r.status_code == 200:
                 data = r.json()
                 
-                # Extract observations
-                obs = data.get("observation", {})
-                task_id = obs.get("task_id")
-                severity = obs.get("severity")
-                print(f"Observation: Task ID: {task_id}, Severity: {severity}")
+                # Extract safety assessment
+                safety = data.get("safety_assessment", {})
+                safety_status = safety.get("safety_status")
+                hard_stop = safety.get("hard_stop")
+                blocked_act = safety.get("blocked_action")
+                print(f"Safety Assessment: Status={safety_status}, HardStop={hard_stop}, BlockedAction={blocked_act}")
                 
                 # Extract financial assessment
                 fin = data.get("financial_assessment", {})

@@ -17,22 +17,21 @@ _ADVISORY_DISCLAIMER = (
 )
 
 # ---------------------------------------------------------------------------
-# Mock brief template — interpolates actual hard_stop + triggered_rules values
+# Mock brief template — interpolates actual safety_status + triggered_rules
 # at render time, preventing narrative/decision mismatches structurally.
 # ---------------------------------------------------------------------------
 def _mock_structured_explanation(
-    event_type: str,
+    event_type: Optional[str],
     severity: int,
     hard_stop: bool,
-    triggered_rules: List[Dict[str, str]],
+    triggered_rules: List[Dict[str, Any]],
+    task_not_matched: bool = False,
+    safety_status: str = "SAFE",
 ) -> Dict[str, str]:
     """
-    Generates deterministic structured halt explanation by interpolating actual
-    hard_stop/triggered_rules values at render time. Three distinct fields:
-      - plain_reason: non-technical "why we stopped"
-      - override_risk: concrete consequences if ignored (references actual rule code)
-      - exception_mitigation: steps under emergency exception (NOT compliance)
-    No independently-authored canned text — templates are the single source of truth.
+    Generates deterministic structured explanation by interpolating actual
+    safety_status, hard_stop, and triggered_rules values at render time.
+    Supports all five statuses: SAFE, CONDITIONAL, BLOCKED, UNKNOWN, ESCALATE.
     """
     rules_text = (
         ", ".join(r['code'] for r in triggered_rules) if triggered_rules else "none"
@@ -40,7 +39,53 @@ def _mock_structured_explanation(
     first_rule_code = triggered_rules[0]['code'] if triggered_rules else "(no rule)"
     first_rule_desc = triggered_rules[0]['description'] if triggered_rules else ""
 
-    if hard_stop:
+    if safety_status == "ESCALATE":
+        plain_reason = (
+            f"[MOCK] High-severity safety event (category: {event_type or 'unspecified'}, severity {severity}/10) "
+            f"requires immediate escalation to the Site Incident Commander. Autonomous operational clearance is suspended."
+        )
+        override_risk = (
+            "[MOCK] Attempting to override an escalated safety incident carries extreme life-safety risk, "
+            "potential catastrophic injury, severe regulatory prosecution, and statutory project shutdown."
+        )
+        exception_mitigation = (
+            "[MOCK — NOT COMPLIANCE] If an emergency exception is invoked during an escalated crisis: "
+            "(1) Mandatory physical sign-off by the Site Incident Commander and Lead Safety Engineer. "
+            "(2) Complete evacuation of non-essential personnel from affected sectors. "
+            "(3) Continuous atmospheric and structural monitoring with automated alarm fail-safes. "
+            "(4) Immediate formal dispatch to municipal and statutory safety authorities."
+        )
+    elif safety_status == "UNKNOWN":
+        plain_reason = (
+            f"[MOCK] This site event (category: {event_type or 'unspecified'}, severity {severity}/10) could not "
+            f"be matched to an active schedule task. Safety status is UNKNOWN pending physical site verification."
+        )
+        override_risk = (
+            "[MOCK] Proceeding without verified task identification risks unmonitored hazard propagation "
+            "across overlapping work zones and unassigned contractor liability."
+        )
+        exception_mitigation = (
+            "[MOCK — NOT COMPLIANCE] If work proceeds while task ID is unverified: "
+            "(1) Field safety officer must physically locate and survey the work area. "
+            "(2) Confirm the active subcontractor and verify task scope against the master schedule. "
+            "(3) Log verified task ID and clearance before standard operations resume."
+        )
+    elif safety_status == "CONDITIONAL":
+        plain_reason = (
+            f"[MOCK] Operations under regulation {first_rule_code} are CONDITIONAL upon physical verification "
+            f"and certification of mandated safety controls (severity {severity}/10)."
+        )
+        override_risk = (
+            f"[MOCK] Resuming operations without verifying required controls for {first_rule_code} ({first_rule_desc}) "
+            f"exposes workers to preventable hazards and violates statutory pre-start safety mandates."
+        )
+        exception_mitigation = (
+            f"[MOCK — NOT COMPLIANCE] Under conditional authorization for {first_rule_code}: "
+            "(1) Safety supervisor must physically inspect and sign off on all required control measures. "
+            "(2) Conduct atmospheric and structural barrier checks prior to worker entry. "
+            "(3) Maintain continuous surveillance until the critical phase is completed."
+        )
+    elif safety_status == "BLOCKED":
         plain_reason = (
             f"[MOCK] This site event (category: {event_type}, severity {severity}/10) has triggered a mandatory "
             f"work stoppage under regulation {first_rule_code}. Operations must halt because the conditions "
@@ -60,10 +105,10 @@ def _mock_structured_explanation(
             f"(4) Log the exception in the site safety diary with timestamp and reason. "
             f"This does not constitute regulatory compliance and does not remove legal liability."
         )
-    else:
+    else:  # SAFE (or CLEAR)
         plain_reason = (
             f"[MOCK] This site event (category: {event_type}, severity {severity}/10) did not match any "
-            f"active regulatory rule trigger condition. No hard stop is required. Rules checked: {rules_text}."
+            f"active regulatory rule trigger condition. Safety status is SAFE. Rules checked: {rules_text}."
         )
         override_risk = (
             "[MOCK] No override context — hard stop was not triggered. Standard site precaution protocols apply."
@@ -80,7 +125,7 @@ def _mock_structured_explanation(
 
 
 # ---------------------------------------------------------------------------
-# Mock advisory template — per event_type, no hard_stop dependency
+# Mock advisory template — per event_type and special status categories
 # ---------------------------------------------------------------------------
 _MOCK_ADVISORIES: Dict[str, str] = {
     "work_at_height": (
@@ -109,6 +154,19 @@ _MOCK_ADVISORIES: Dict[str, str] = {
         "- Resequence non-dependent tasks to maintain worker productivity."
     ),
 }
+
+_UNMATCHED_ADVISORY = (
+    "- Dispatch field supervisor to verify work zone location and affected crew.\n"
+    "- Cross-reference shift logbooks against scheduled task IDs.\n"
+    "- Re-submit incident report with verified task coordinates."
+)
+
+_ESCALATE_ADVISORY = (
+    "- Immediately initiate site-wide emergency muster and personnel accountability check.\n"
+    "- Dispatch rapid-response safety team to identify incident origin and secure boundaries.\n"
+    "- Brief Site Incident Commander and halt all adjacent operations until hazard is isolated."
+)
+
 _DEFAULT_ADVISORY = (
     "- Follow standard job safety analysis procedures.\n"
     "- Review contractor safety compliance logs.\n"
@@ -117,26 +175,72 @@ _DEFAULT_ADVISORY = (
 
 
 def _generate_5tier_safety_filter(
-    event_type: str,
+    event_type: Optional[str],
     severity: int,
     hard_stop: bool,
-    triggered_rules: List[Dict[str, str]],
-    plain_reason: str
+    triggered_rules: List[Dict[str, Any]],
+    plain_reason: str,
+    safety_status: str = "SAFE",
 ) -> Dict[str, Any]:
     """
-    Categorizes safety action using the 5-Tier Safety Filter schema:
-      - safety_status: "BLOCKED" | "CLEAR"
-      - blocked_action: string identifier for unsafe action being attempted
-      - regulatory_rule_violated: name/code of regulation violated
-      - violation_reason: factual description of hazard
+    Categorizes safety action using the full 5-Tier Safety Filter schema:
+      - safety_status: "SAFE" | "CONDITIONAL" | "BLOCKED" | "UNKNOWN" | "ESCALATE"
+      - blocked_action: string identifier for unsafe or pending action
+      - regulatory_rule_violated: name/code of regulation(s) violated or evaluated
+      - violation_reason: factual description of hazard or state
       - mandatory_field_controls: crew instructions for ground handling
       - counterfactual_analysis_target: action simulation configuration for Finance/CPM engine
       - suggested_compliant_alternatives: safety-compliant workarounds
     """
-    safety_status = "BLOCKED" if hard_stop else "CLEAR"
     rule_codes = ", ".join(r['code'] for r in triggered_rules) if triggered_rules else "NONE"
-    
-    if hard_stop:
+
+    if safety_status == "ESCALATE":
+        blocked_action = "escalate_to_incident_commander"
+        mandatory_field_controls = [
+            "Issue immediate site-wide standdown order across affected sectors",
+            "Deploy emergency response team to assess hazard perimeter",
+            "Escalate directly to Site Incident Commander and Project Director"
+        ]
+        suggested_compliant_alternatives = [
+            "Maintain emergency standby until physical location and risk verification is completed",
+            "Convene joint contractor-owner safety board for multi-statutory resolution"
+        ]
+    elif safety_status == "UNKNOWN":
+        blocked_action = "verify_location_and_task"
+        mandatory_field_controls = [
+            "Dispatch area supervisor to verify location and affected task",
+            "Check contractor logbooks for unrecorded task activity",
+            "Submit updated event report with verified Task ID"
+        ]
+        suggested_compliant_alternatives = [
+            "Hold work near unverified zones until supervisor verification is complete",
+            "Redirect unassigned labor to verified off-path support tasks"
+        ]
+    elif safety_status == "CONDITIONAL":
+        blocked_action = f"verify_required_controls_for_{event_type or 'operation'}"
+        if event_type == "excavation":
+            mandatory_field_controls = [
+                "Verify trench shoring and shielding stability before allowing personnel near excavation faces",
+                "Conduct atmospheric hazard check (oxygen, CO, methane) at trench entry points",
+                "Obtain signed clearance certificate from geotechnical safety engineer"
+            ]
+            suggested_compliant_alternatives = [
+                "Install hydraulic trench shoring boxes before resuming digging",
+                "Implement benching and sloping protocols per engineering spec",
+                "Divert groundwater using dewatering sump pumps"
+            ]
+        else:
+            mandatory_field_controls = [
+                f"Conduct mandatory safety verification check per {rule_codes}",
+                "Verify required engineering controls and physical barriers before resumption",
+                "Obtain signed clearance certificate from certified site safety inspector"
+            ]
+            suggested_compliant_alternatives = [
+                "Perform pre-start safety audit and checklist verification",
+                "Deploy auxiliary certified protective equipment",
+                "Resume work in staged phases under active safety supervision"
+            ]
+    elif safety_status == "BLOCKED":
         if event_type == "extreme_weather":
             blocked_action = "continue_outdoor_crane_and_site_operations"
             mandatory_field_controls = [
@@ -199,7 +303,7 @@ def _generate_5tier_safety_filter(
                 "Deploy auxiliary safety controls and personal protective equipment",
                 "Resequence unimpacted off-path site tasks"
             ]
-    else:
+    else:  # SAFE (or CLEAR)
         blocked_action = "none"
         mandatory_field_controls = [
             "Follow standard job safety analysis procedures",
@@ -211,8 +315,7 @@ def _generate_5tier_safety_filter(
         ]
 
     violation_reason = plain_reason or (
-        f"Site event (category: {event_type}, severity {severity}/10) violated regulation {rule_codes}."
-        if hard_stop else "No regulatory rule violations detected."
+        f"Site event (category: {event_type}, severity {severity}/10) evaluated with safety status {safety_status} under rules: {rule_codes}."
     )
 
     return {
@@ -231,11 +334,14 @@ def _generate_5tier_safety_filter(
 
 def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] = None) -> Dict[str, Any]:
     """
-    Evaluates safety compliance by matching the event type against active regulatory rules.
-    Issues a HARD_STOP if any matching rule is found.
-    In mock mode (USE_MOCK_LLM=true) or upon API failure, returns deterministic results with fallback_mode_active=True.
-    Includes the 5-Tier Safety Filter output (safety_status, blocked_action, regulatory_rule_violated,
-    violation_reason, mandatory_field_controls, counterfactual_analysis_target, suggested_compliant_alternatives).
+    Evaluates safety compliance by matching the event against active regulatory rules
+    and observation state. Supports full 5-tier classification:
+    - SAFE: no regulatory violations, valid task match
+    - CONDITIONAL: rules requiring specific control verification (e.g. excavation shoring, restart-after-repair)
+    - BLOCKED: direct statutory violation requiring mandatory work halt
+    - UNKNOWN: event task could not be matched to the schedule (task_not_matched=True, severity < 10)
+    - ESCALATE: high-severity unidentifiable crisis (severity=10, task_not_matched=True) or multi-source regulatory conflict
+    - UNAVAILABLE: upstream parse error or execution exception
     """
     # 1. Handle upstream parse errors
     if observe_output.get("parse_error"):
@@ -262,33 +368,205 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
             "parse_error": True
         }
 
+    task_not_matched = bool(observe_output.get("task_not_matched"))
     event_type = observe_output.get("event_type")
-    severity = observe_output.get("severity")
+    severity = int(observe_output.get("severity") or 1)
 
-    # 2. Load active regulatory knowledge base rules (always deterministic — never mocked)
+    # 2. Short-circuit for task_not_matched (Rule matching against an unidentified task is not meaningful)
+    if task_not_matched:
+        if severity >= 10:
+            safety_status = "ESCALATE"
+            hard_stop = True
+        else:
+            safety_status = "UNKNOWN"
+            hard_stop = False
+
+        triggered_rules: List[Dict[str, Any]] = []
+
+        if use_mock_llm():
+            logger.info(f"[MOCK MODE] Safety Agent handling task_not_matched -> {safety_status}")
+            explanation = _mock_structured_explanation(
+                event_type, severity, hard_stop, triggered_rules,
+                task_not_matched=True, safety_status=safety_status
+            )
+            advisory = _ESCALATE_ADVISORY if safety_status == "ESCALATE" else _UNMATCHED_ADVISORY
+            tier5 = _generate_5tier_safety_filter(
+                event_type, severity, hard_stop, triggered_rules,
+                explanation["plain_reason"], safety_status=safety_status
+            )
+            return {
+                "hard_stop": hard_stop,
+                "safety_status": tier5["safety_status"],
+                "blocked_action": tier5["blocked_action"],
+                "regulatory_rule_violated": tier5["regulatory_rule_violated"],
+                "violation_reason": tier5["violation_reason"],
+                "mandatory_field_controls": tier5["mandatory_field_controls"],
+                "counterfactual_analysis_target": tier5["counterfactual_analysis_target"],
+                "suggested_compliant_alternatives": tier5["suggested_compliant_alternatives"],
+                "triggered_rules": triggered_rules,
+                "plain_reason": explanation["plain_reason"],
+                "override_risk": explanation["override_risk"],
+                "exception_mitigation": explanation["exception_mitigation"],
+                "advisory_considerations": advisory,
+                "advisory_disclaimer": _ADVISORY_DISCLAIMER,
+                "fallback_mode_active": True,
+                "parse_error": False
+            }
+
+        # Live Gemini execution for task_not_matched
+        api_key = get_api_key()
+        agent_fallback = False
+        if not api_key:
+            fallback_expl = _mock_structured_explanation(
+                event_type, severity, hard_stop, triggered_rules,
+                task_not_matched=True, safety_status=safety_status
+            )
+            plain_reason = fallback_expl["plain_reason"]
+            override_risk = fallback_expl["override_risk"]
+            exception_mitigation = fallback_expl["exception_mitigation"]
+            advisory_considerations = _ESCALATE_ADVISORY if safety_status == "ESCALATE" else _UNMATCHED_ADVISORY
+            agent_fallback = True
+        else:
+            client = genai.Client(api_key=api_key)
+            prompt = f"""
+You are the Safety Agent for ConstructionOS AI.
+The safety status is FIXED as {safety_status} because the site event could NOT be matched to any active schedule task.
+
+FIXED FACTS:
+- SAFETY_STATUS: {safety_status}
+- HARD_STOP: {hard_stop}
+- Task Matched: FALSE (unidentified location/task)
+- Event Severity: {severity}/10
+- Event Category: {event_type or 'unspecified'}
+
+Raw Jobsite Report: "{raw_event_text or 'No raw text provided.'}"
+
+Generate EXACTLY THREE fields as a JSON object with these keys:
+1. "plain_reason": One plain-English sentence explaining why safety status is {safety_status} due to unverified task location.
+2. "override_risk": 2-3 sentences on concrete risks of proceeding with unverified task coordinates.
+3. "exception_mitigation": 3-4 concrete verification steps before lifting standdown. Start with: "NOT COMPLIANCE — emergency exception steps only:"
+
+Return ONLY the JSON object, no other text.
+"""
+            try:
+                response = call_gemini_with_retry(
+                    client=client,
+                    model=MODEL_NAME,
+                    contents=prompt,
+                    max_retries=3,
+                    initial_delay=1.0,
+                    backoff_factor=2.0
+                )
+                parsed = json.loads(response.text.strip())
+                plain_reason = parsed.get("plain_reason", "")
+                override_risk = parsed.get("override_risk", "")
+                exception_mitigation = parsed.get("exception_mitigation", "")
+            except Exception as e:
+                logger.error(f"Gemini unmatched explanation failed: {e}")
+                fallback_expl = _mock_structured_explanation(
+                    event_type, severity, hard_stop, triggered_rules,
+                    task_not_matched=True, safety_status=safety_status
+                )
+                plain_reason = fallback_expl["plain_reason"]
+                override_risk = fallback_expl["override_risk"]
+                exception_mitigation = fallback_expl["exception_mitigation"]
+                agent_fallback = True
+
+            # Advisory considerations for unmatched task
+            prompt_advisory = f"""
+You are the Safety Agent for ConstructionOS AI.
+Generate 2-3 brief bullet points (under 60 words) on best practices for site supervisors to verify unidentified job-site incidents and coordinate emergency verification for a category '{event_type or 'general'}' report.
+"""
+            try:
+                res_advisory = call_gemini_with_retry(
+                    client=client,
+                    model=MODEL_NAME,
+                    contents=prompt_advisory,
+                    max_retries=3,
+                    initial_delay=1.0,
+                    backoff_factor=2.0
+                )
+                advisory_considerations = res_advisory.text.strip()
+            except Exception as e:
+                logger.error(f"Gemini unmatched advisory failed: {e}")
+                advisory_considerations = _ESCALATE_ADVISORY if safety_status == "ESCALATE" else _UNMATCHED_ADVISORY
+                agent_fallback = True
+
+        tier5 = _generate_5tier_safety_filter(
+            event_type, severity, hard_stop, triggered_rules, plain_reason, safety_status=safety_status
+        )
+        return {
+            "hard_stop": hard_stop,
+            "safety_status": tier5["safety_status"],
+            "blocked_action": tier5["blocked_action"],
+            "regulatory_rule_violated": tier5["regulatory_rule_violated"],
+            "violation_reason": tier5["violation_reason"],
+            "mandatory_field_controls": tier5["mandatory_field_controls"],
+            "counterfactual_analysis_target": tier5["counterfactual_analysis_target"],
+            "suggested_compliant_alternatives": tier5["suggested_compliant_alternatives"],
+            "triggered_rules": triggered_rules,
+            "plain_reason": plain_reason,
+            "override_risk": override_risk,
+            "exception_mitigation": exception_mitigation,
+            "advisory_considerations": advisory_considerations,
+            "advisory_disclaimer": _ADVISORY_DISCLAIMER,
+            "fallback_mode_active": agent_fallback or observe_output.get("fallback_mode_active", False),
+            "parse_error": False
+        }
+
+    # 3. Task is matched: Load active regulatory knowledge base rules (deterministic)
     state, state_fallback = get_project_state()
     rules = state.get("regulatory_kb", [])
 
-    # 3. Match rules based on trigger condition (deterministic — never mocked)
+    # 4. Match rules based on trigger condition (deterministic)
     triggered_rules = []
     for rule in rules:
         if rule.get("trigger_condition") == event_type:
             triggered_rules.append({
                 "code": rule.get("code"),
-                "description": rule.get("description")
+                "description": rule.get("description"),
+                "requires_control_verification": rule.get("requires_control_verification", False),
+                "is_conditional": rule.get("is_conditional", False)
             })
 
-    # HARD_STOP is True if any rule trigger condition matches the event type.
-    # WARNING: advisory_considerations must never influence hard_stop.
-    hard_stop = len(triggered_rules) > 0
+    # 5. Determine 5-Tier Safety Status
+    rule_codes = [r.get("code", "") for r in triggered_rules]
+    prefixes = set(c.split("_")[0] for c in rule_codes if "_" in c)
+    is_multi_source_conflict = len(prefixes) > 1 or len(triggered_rules) >= 3
 
-    # --- MOCK MODE: skip all Gemini calls, use templated structured explanation ---
+    is_conditional_rule = any(
+        r.get("requires_control_verification") or
+        r.get("is_conditional") or
+        "BOCW_SEC_46" in r.get("code", "") or
+        "conditional" in r.get("description", "").lower() or
+        "verification" in r.get("description", "").lower()
+        for r in triggered_rules
+    )
+
+    if is_multi_source_conflict:
+        safety_status = "ESCALATE"
+        hard_stop = True
+    elif is_conditional_rule:
+        safety_status = "CONDITIONAL"
+        hard_stop = True
+    elif len(triggered_rules) > 0:
+        safety_status = "BLOCKED"
+        hard_stop = True
+    else:
+        safety_status = "SAFE"
+        hard_stop = False
+
+    # --- MOCK MODE: skip all Gemini calls ---
     if use_mock_llm():
-        logger.info("[MOCK MODE] Safety Agent running without Gemini API call.")
-        explanation = _mock_structured_explanation(event_type, severity, hard_stop, triggered_rules)
+        logger.info(f"[MOCK MODE] Safety Agent running without Gemini API call. Status: {safety_status}")
+        explanation = _mock_structured_explanation(
+            event_type, severity, hard_stop, triggered_rules,
+            task_not_matched=False, safety_status=safety_status
+        )
         advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
         tier5 = _generate_5tier_safety_filter(
-            event_type, severity, hard_stop, triggered_rules, explanation["plain_reason"]
+            event_type, severity, hard_stop, triggered_rules,
+            explanation["plain_reason"], safety_status=safety_status
         )
         return {
             "hard_stop": hard_stop,
@@ -309,7 +587,7 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
             "parse_error": False
         }
 
-    # 4. Generate structured explanation using Gemini (decision treated as fixed facts)
+    # 6. Generate structured explanation using Gemini
     api_key = get_api_key()
     rules_json = json.dumps(triggered_rules)
     first_rule_code = triggered_rules[0]['code'] if triggered_rules else "(no rule triggered)"
@@ -317,7 +595,10 @@ def assess_safety(observe_output: Dict[str, Any], raw_event_text: Optional[str] 
 
     if not api_key:
         logger.warning("GEMINI_API_KEY not configured. Safety Agent using offline fallback explanation.")
-        fallback_expl = _mock_structured_explanation(event_type, severity, hard_stop, triggered_rules)
+        fallback_expl = _mock_structured_explanation(
+            event_type, severity, hard_stop, triggered_rules,
+            task_not_matched=False, safety_status=safety_status
+        )
         plain_reason = fallback_expl["plain_reason"]
         override_risk = fallback_expl["override_risk"]
         exception_mitigation = fallback_expl["exception_mitigation"]
@@ -329,6 +610,7 @@ You are the Safety Agent for ConstructionOS AI.
 The safety decision below is ALREADY FIXED — do not re-evaluate it.
 
 FIXED FACTS:
+- SAFETY_STATUS: {safety_status}
 - HARD_STOP: {hard_stop}
 - Triggered Regulations: {rules_json}
 - Event Category: {event_type}
@@ -338,8 +620,8 @@ FIXED FACTS:
 Raw Jobsite Report: "{raw_event_text or 'No raw text provided.'}"
 
 Generate EXACTLY THREE fields as a JSON object with these keys:
-1. "plain_reason": One plain-English sentence explaining why operations must stop (or not). Non-technical. Must be consistent with HARD_STOP={hard_stop}.
-2. "override_risk": 2-3 sentences on concrete consequences if a site manager ignores this decision. MUST explicitly reference {first_rule_code} by name. Be specific — no generic safety language.
+1. "plain_reason": One plain-English sentence explaining the {safety_status} safety decision. Non-technical. Must be consistent with HARD_STOP={hard_stop} and SAFETY_STATUS={safety_status}.
+2. "override_risk": 2-3 sentences on concrete consequences if a site manager ignores this decision. MUST explicitly reference {first_rule_code} by name if rules are triggered.
 3. "exception_mitigation": 3-4 concrete steps a site manager must take if they invoke an emergency exception to continue. Start with: "NOT COMPLIANCE — emergency exception steps only:"
 
 Return ONLY the JSON object, no other text.
@@ -359,13 +641,16 @@ Return ONLY the JSON object, no other text.
             exception_mitigation = parsed.get("exception_mitigation", "")
         except Exception as e:
             logger.error(f"Gemini structured explanation failed after retries: {e}")
-            fallback_expl = _mock_structured_explanation(event_type, severity, hard_stop, triggered_rules)
+            fallback_expl = _mock_structured_explanation(
+                event_type, severity, hard_stop, triggered_rules,
+                task_not_matched=False, safety_status=safety_status
+            )
             plain_reason = fallback_expl["plain_reason"]
             override_risk = fallback_expl["override_risk"]
             exception_mitigation = fallback_expl["exception_mitigation"]
             agent_fallback = True
 
-    # 5. Generate advisory considerations (best practices relevant to event category)
+    # 7. Generate advisory considerations (best practices relevant to event category)
     advisory_considerations = ""
     if not api_key:
         advisory_considerations = _MOCK_ADVISORIES.get(event_type, _DEFAULT_ADVISORY)
@@ -394,7 +679,7 @@ Keep the advisory brief, professional, and structured as bullet points (under 80
             agent_fallback = True
 
     tier5 = _generate_5tier_safety_filter(
-        event_type, severity, hard_stop, triggered_rules, plain_reason
+        event_type, severity, hard_stop, triggered_rules, plain_reason, safety_status=safety_status
     )
 
     fallback_active = agent_fallback or state_fallback or observe_output.get("fallback_mode_active", False)
@@ -417,5 +702,3 @@ Keep the advisory brief, professional, and structured as bullet points (under 80
         "fallback_mode_active": fallback_active,
         "parse_error": False
     }
-
-

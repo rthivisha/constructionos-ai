@@ -89,7 +89,11 @@ export const api = {
     return handleResponse(res);
   },
 
-  async processSiteEvent(eventText: string, attachment?: AttachmentPayload | null) {
+  async processSiteEvent(
+    eventText: string,
+    attachment?: AttachmentPayload | null,
+    controls_verified: boolean = false
+  ) {
     const res = await fetch(`${API_BASE_URL}/api/events`, {
       method: 'POST',
       headers: {
@@ -97,7 +101,8 @@ export const api = {
       },
       body: JSON.stringify({
         event_text: eventText,
-        attachment: attachment || null
+        attachment: attachment || null,
+        controls_verified: Boolean(controls_verified)
       }),
     });
     return handleResponse(res);

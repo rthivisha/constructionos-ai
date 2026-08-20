@@ -396,7 +396,134 @@ def test_safety_agent_material_shortage_no_hard_stop():
         res = assess_safety(observe_output_material, "Minor electrical conduit supplier delivery delay.")
         assert res["hard_stop"] is False
         assert len(res["triggered_rules"]) == 0
-        assert res["safety_status"] == "CLEAR"
+        assert res["safety_status"] == "SAFE"
         assert res["blocked_action"] == "none"
         assert "procurement" in res["advisory_considerations"].lower() or "material" in res["advisory_considerations"].lower()
+
+
+def test_safety_agent_5tier_all_five_statuses_reachable():
+    """
+    Asserts that all five distinct safety statuses (SAFE, CONDITIONAL, BLOCKED, UNKNOWN, ESCALATE)
+    plus UNAVAILABLE are independently reachable via distinct concrete scenarios.
+    """
+    # 1. SAFE — Matched task with no triggered safety rules
+    obs_safe = {
+        "event_type": EventType.MATERIAL_SHORTAGE.value,
+        "task_id": "T-101",
+        "severity": 2,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res_safe = assess_safety(obs_safe, "Safe non-regulatory material delivery delay.")
+        assert res_safe["safety_status"] == "SAFE"
+        assert res_safe["hard_stop"] is False
+        assert res_safe["blocked_action"] == "none"
+
+    # 2. CONDITIONAL — Rule requiring mandatory control verification (e.g. BOCW_SEC_46 excavation shoring)
+    conn = sqlite3.connect(TEST_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO regulatory_kb (code, description, trigger_condition) VALUES (?, ?, ?);",
+        ("BOCW_SEC_46", "Excavation depth requires side shoring and safety verification.", EventType.EXCAVATION.value)
+    )
+    conn.commit()
+    conn.close()
+
+    obs_conditional = {
+        "event_type": EventType.EXCAVATION.value,
+        "task_id": "T-101",
+        "severity": 6,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res_cond = assess_safety(obs_conditional, "Excavation digging in progress.")
+        assert res_cond["safety_status"] == "CONDITIONAL"
+        assert res_cond["hard_stop"] is True
+        assert "verify_required_controls" in res_cond["blocked_action"]
+        assert len(res_cond["mandatory_field_controls"]) >= 2
+
+    # 3. BLOCKED — Standard statutory prohibition (e.g. BOCW_SEC_40 height violation)
+    obs_blocked = {
+        "event_type": EventType.WORK_AT_HEIGHT.value,
+        "task_id": "T-101",
+        "severity": 8,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res_blocked = assess_safety(obs_blocked, "Tower crane hoist malfunction.")
+        assert res_blocked["safety_status"] == "BLOCKED"
+        assert res_blocked["hard_stop"] is True
+        assert res_blocked["blocked_action"] == "continue_high_elevation_rigging_and_lifting"
+
+    # 4. UNKNOWN — Ambiguous report where task_not_matched is True (severity < 10)
+    obs_unknown = {
+        "event_type": EventType.EXCAVATION.value,
+        "task_id": None,
+        "severity": 4,
+        "task_not_matched": True,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res_unknown = assess_safety(obs_unknown, "Unspecified excavation incident near unknown sector.")
+        assert res_unknown["safety_status"] == "UNKNOWN"
+        assert res_unknown["hard_stop"] is False
+        assert res_unknown["blocked_action"] == "verify_location_and_task"
+        assert "UNKNOWN" in res_unknown["plain_reason"]
+
+    # 5. ESCALATE (Path A) — Max severity (10/10) with unverified task
+    obs_escalate_severity = {
+        "event_type": EventType.EXCAVATION.value,
+        "task_id": None,
+        "severity": 10,
+        "task_not_matched": True,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res_esc_a = assess_safety(obs_escalate_severity, "Catastrophic structural tremor at unknown location.")
+        assert res_esc_a["safety_status"] == "ESCALATE"
+        assert res_esc_a["hard_stop"] is True
+        assert res_esc_a["blocked_action"] == "escalate_to_incident_commander"
+
+    # 5. ESCALATE (Path B) — Multi-statutory conflict across multiple regulatory bodies
+    conn = sqlite3.connect(TEST_DB_PATH)
+    cursor = conn.cursor()
+    cursor.execute(
+        "INSERT INTO regulatory_kb (code, description, trigger_condition) VALUES (?, ?, ?);",
+        ("FA_SEC_12", "Factories Act Section 12: Gas scrubber effluent controls.", EventType.TOXIC_GAS.value)
+    )
+    cursor.execute(
+        "INSERT INTO regulatory_kb (code, description, trigger_condition) VALUES (?, ?, ?);",
+        ("BOCW_SEC_88", "BOCW Section 88: Confined air displacement protocol.", EventType.TOXIC_GAS.value)
+    )
+    conn.commit()
+    conn.close()
+
+    obs_escalate_conflict = {
+        "event_type": EventType.TOXIC_GAS.value,
+        "task_id": "T-101",
+        "severity": 8,
+        "task_not_matched": False,
+        "parse_error": False
+    }
+    with patch('backend.agents.safety_agent.get_api_key', return_value=""):
+        res_esc_b = assess_safety(obs_escalate_conflict, "Multi-hazard chemical leak.")
+        assert res_esc_b["safety_status"] == "ESCALATE"
+        assert res_esc_b["hard_stop"] is True
+        assert res_esc_b["blocked_action"] == "escalate_to_incident_commander"
+
+    # 6. UNAVAILABLE — Parse error from upstream Observe Agent
+    obs_unavailable = {
+        "event_type": None,
+        "task_id": None,
+        "severity": None,
+        "task_not_matched": True,
+        "parse_error": True
+    }
+    res_unavail = assess_safety(obs_unavailable, "Malformed input.")
+    assert res_unavail["safety_status"] == "UNAVAILABLE"
+    assert res_unavail["hard_stop"] is False
+
 

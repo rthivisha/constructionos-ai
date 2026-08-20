@@ -32,6 +32,12 @@ class AttachmentPayload(BaseModel):
 class EventPayload(BaseModel):
     event_text: str
     attachment: Optional[AttachmentPayload] = None
+    # CRITICAL SAFETY CONSTRAINT:
+    # controls_verified must remain an explicit human-confirmed flag originating from a site
+    # manager action in the UI. It must NEVER be inferred, assumed, defaulted to True, or
+    # self-certified by any LLM call, since an AI model confirming its own prerequisite defeats
+    # the entire purpose of the human safety verification gate.
+    controls_verified: bool = False
 
 
 # ===========================================================================
@@ -39,19 +45,20 @@ class EventPayload(BaseModel):
 # ===========================================================================
 # SAFETY BOUNDARY CONSTRAINT:
 # Only exact normalized-text matches (lowercase, trimmed, single whitespace,
-# SHA-256 hashed) will be cached and served from query_cache.
-# Fuzzy matching, approximate matching, or keyword similarity search are
+# SHA-256 hashed) with matching controls_verified state will be cached and
+# served from query_cache. Fuzzy matching or keyword similarity search are
 # strictly forbidden so that safety-critical compliance evaluations are never
 # served from an approximate match.
 # ===========================================================================
 
-def normalize_event_text(text: str) -> tuple[str, str]:
+def normalize_event_text(text: str, controls_verified: bool = False) -> tuple[str, str]:
     """
     Normalizes event text by trimming, lowercasing, and collapsing whitespace,
-    then generates a SHA-256 hash.
+    combined with controls_verified status, then generates a SHA-256 hash.
     """
     clean_text = re.sub(r'\s+', ' ', text.strip().lower())
-    normalized_hash = hashlib.sha256(clean_text.encode('utf-8')).hexdigest()
+    cache_key_raw = f"{clean_text}::controls_verified={controls_verified}"
+    normalized_hash = hashlib.sha256(cache_key_raw.encode('utf-8')).hexdigest()
     return clean_text, normalized_hash
 
 
@@ -126,7 +133,7 @@ async def process_site_event(payload: EventPayload):
         }
 
     # Normalize input text and check exact-match response cache
-    clean_text, normalized_hash = normalize_event_text(payload.event_text)
+    clean_text, normalized_hash = normalize_event_text(payload.event_text, payload.controls_verified)
     cached_response = get_cached_response(normalized_hash)
     if cached_response is not None:
         logger.info(f"Exact-match query_cache HIT for hash {normalized_hash[:10]}...")
@@ -191,7 +198,13 @@ async def process_site_event(payload: EventPayload):
 
     # 4. Reconciliation Stage (Weigh Safety vs Finance trade-offs)
     try:
-        tradeoff_res = await asyncio.to_thread(assess_tradeoff, safety_res, finance_res, payload.event_text)
+        tradeoff_res = await asyncio.to_thread(
+            assess_tradeoff,
+            safety_res,
+            finance_res,
+            payload.event_text,
+            payload.controls_verified
+        )
     except Exception as e:
         logger.error(f"Trade-off Agent execution crashed: {e}")
         # Fallback decision is always halt on pipeline tradeoff errors to prioritize safety
@@ -282,6 +295,7 @@ async def process_site_event(payload: EventPayload):
         "tradeoff_reconciliation": tradeoff_res,
         "proposed_reschedule": reschedule_proposal,
         "delay_simulation": delay_simulation,
+        "controls_verified": payload.controls_verified,
         "fallback_mode_active": is_fallback,
         "cached": False
     }

@@ -88,12 +88,13 @@ interface ReasoningTraceProps {
       summary: string;
     };
     tradeoff_reconciliation: {
-      decision: "halt" | "continue";
+      decision: "halt" | "continue" | "pending_verification";
       reasoning: string;
       rejected_alternative: "halt" | "continue";
       rejected_because: string;
       fallback_mode_active?: boolean;
     };
+    controls_verified?: boolean;
     attachment?: {
       filename: string;
       url: string;
@@ -102,6 +103,8 @@ interface ReasoningTraceProps {
   };
   rawText?: string;
   onReset?: () => void;
+  onConfirmControlsVerified?: () => void | Promise<void>;
+  isVerifyingControls?: boolean;
 }
 
 function Card({ children, className, glow }: { children: React.ReactNode; className?: string; glow?: "halt"|"ok"|"none" }) {
@@ -122,16 +125,17 @@ function Card({ children, className, glow }: { children: React.ReactNode; classN
   );
 }
 
-function Badge({ children, variant = "default" }: { children: React.ReactNode; variant?: "default"|"halt"|"ok"|"warn"|"muted" }) {
+function Badge({ children, variant = "default", className }: { children: React.ReactNode; variant?: "default"|"halt"|"ok"|"warn"|"muted"|"escalate"; className?: string }) {
   const styles: Record<string, string> = {
     default: "bg-white/8 text-slate-400 border-white/10",
     halt: "bg-red-500/15 text-red-400 border-red-500/30",
     ok: "bg-emerald-500/15 text-emerald-400 border-emerald-500/30",
     warn: "bg-amber-500/15 text-amber-400 border-amber-500/30",
     muted: "bg-white/5 text-slate-500 border-white/8",
+    escalate: "bg-purple-500/15 text-purple-300 border-purple-500/30 shadow-[0_0_15px_-3px_rgba(168,85,247,0.3)]",
   };
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide", styles[variant])}>
+    <span className={cn("inline-flex items-center rounded-full border px-2.5 py-0.5 text-xs font-semibold tracking-wide", styles[variant], className)}>
       {children}
     </span>
   );
@@ -164,7 +168,13 @@ function SeverityBar({ value }: { value: number }) {
   );
 }
 
-export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTraceProps) {
+export default function ReasoningTrace({ 
+  data, 
+  rawText, 
+  onReset,
+  onConfirmControlsVerified,
+  isVerifyingControls 
+}: ReasoningTraceProps) {
   const [activeStage, setActiveStage] = useState<1 | 2 | 3 | 4>(1);
   const [toast, setToast] = useState<string | null>(null);
 
@@ -198,9 +208,11 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
     const task = observation.task_id || "N/A";
     const category = observation.event_type || "N/A";
     const rule = safety_assessment.triggered_rules?.[0]?.code || "Safety Guideline";
-    const decision = tradeoff_reconciliation?.decision?.toUpperCase() || "HALT";
+    const decision = tradeoff_reconciliation?.decision === "pending_verification"
+      ? "HOLD PENDING FIELD VERIFICATION"
+      : tradeoff_reconciliation?.decision?.toUpperCase() || "HALT";
     
-    return `⚠️ *SAFETY DEVIATION DIRECTIVE* ⚠️\nTask: *${task}* (${category.toUpperCase().replace(/_/g, " ")})\nDirective: *MANDATORY ${decision}*\nReason: Violation of regulatory rule ${rule}.\nDo not attempt local override. Remobilization requires field safety check clearance.`;
+    return `⚠️ *SAFETY DIRECTIVE* ⚠️\nTask: *${task}* (${category.toUpperCase().replace(/_/g, " ")})\nDirective: *MANDATORY ${decision}*\nReason: Compliance requirement under ${rule}.\nDo not proceed until authorized.`;
   };
 
   const getContractorMemo = () => {
@@ -209,9 +221,13 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
     const category = observation.event_type || "N/A";
     const ruleCode = safety_assessment.triggered_rules?.[0]?.code || "BOCW_SEC_40";
     const ruleDesc = safety_assessment.triggered_rules?.[0]?.description || "Regulatory safety check required.";
-    const decision = tradeoff_reconciliation?.decision === "halt" ? "Mandatory suspension of work" : "Heightened surveillance continuation";
+    const decision = tradeoff_reconciliation?.decision === "halt" 
+      ? "Mandatory suspension of work" 
+      : tradeoff_reconciliation?.decision === "pending_verification"
+      ? "Standby pending mandatory field control sign-off"
+      : "Heightened surveillance continuation";
     
-    return `MEMORANDUM\n\nTo: ${contractor} (Main Contractor)\nFrom: ConstructionOS AI Operations Manager\nDate: August 9, 2026\nSubject: AI Safety Directive - ${task} (${category.toUpperCase().replace(/_/g, " ")})\n\nYou are hereby directed to implement the following action: ${decision}.\n\nUnder rule code ${ruleCode} (${ruleDesc}), mandatory Standby and compliance guidelines apply. Re-mobilization requires official sign-off.`;
+    return `MEMORANDUM\n\nTo: ${contractor} (Main Contractor)\nFrom: ConstructionOS AI Operations Manager\nDate: August 9, 2026\nSubject: AI Safety Directive - ${task} (${category.toUpperCase().replace(/_/g, " ")})\n\nYou are hereby directed to implement the following action: ${decision}.\n\nUnder rule code ${ruleCode} (${ruleDesc}), mandatory compliance guidelines apply. Work authorization requires official site-manager verification.`;
   };
 
   const handleFinish = () => {
@@ -447,15 +463,33 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                 <h2 className="text-2xl font-black text-slate-100">Safety & Compliance</h2>
               </div>
               <div>
-                {safety_assessment.status === "unavailable" ? (
+                {safety_assessment.status === "unavailable" || safety_assessment.safety_status === "UNAVAILABLE" ? (
                   <Badge variant="halt">UNAVAILABLE</Badge>
-                ) : isHardStop ? (
+                ) : safety_assessment.safety_status === "ESCALATE" ? (
+                  <Badge variant="escalate">
+                    <span className="mr-1.5 inline-block w-1.5 h-1.5 rounded-full bg-purple-400 animate-pulse" />
+                    ESCALATE
+                  </Badge>
+                ) : safety_assessment.safety_status === "BLOCKED" ? (
                   <Badge variant="halt">
                     <span className="mr-1.5 inline-block w-1.5 h-1.5 rounded-full bg-red-500 animate-ping" />
-                    HALT TRIGGERED
+                    BLOCKED
+                  </Badge>
+                ) : safety_assessment.safety_status === "CONDITIONAL" ? (
+                  <Badge variant="warn">
+                    <span className="mr-1.5 inline-block w-1.5 h-1.5 rounded-full bg-amber-400" />
+                    CONDITIONAL
+                  </Badge>
+                ) : safety_assessment.safety_status === "UNKNOWN" ? (
+                  <Badge variant="muted">
+                    <span className="mr-1.5 inline-block w-1.5 h-1.5 rounded-full bg-blue-400" />
+                    UNKNOWN
                   </Badge>
                 ) : (
-                  <Badge variant="ok">NONE ACTIVE</Badge>
+                  <Badge variant="ok">
+                    <span className="mr-1.5 inline-block w-1.5 h-1.5 rounded-full bg-emerald-500" />
+                    SAFE
+                  </Badge>
                 )}
               </div>
             </div>
@@ -490,7 +524,7 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                 {/* Why Operations Stopped */}
                 {safety_assessment.plain_reason && (
                   <div className="rounded-xl bg-white/[0.02] border border-white/6 p-4">
-                    <p className="text-[10px] font-bold tracking-widest text-slate-500 uppercase mb-1">Why Operations Stopped</p>
+                    <p className="text-[10px] font-bold tracking-widest text-slate-500 uppercase mb-1">Safety Decision Rationale</p>
                     <p className="text-sm text-slate-300 leading-relaxed">{safety_assessment.plain_reason}</p>
                   </div>
                 )}
@@ -522,16 +556,33 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
 
             {/* 5-Tier Safety Filter Output Block */}
             {safety_assessment.safety_status && (
-              <div className="rounded-2xl border border-red-500/20 bg-slate-950/70 p-5 space-y-4 shadow-xl">
+              <div className={cn(
+                "rounded-2xl border bg-slate-950/70 p-5 space-y-4 shadow-xl",
+                safety_assessment.safety_status === "ESCALATE" ? "border-purple-500/30" :
+                safety_assessment.safety_status === "BLOCKED" ? "border-red-500/20" :
+                safety_assessment.safety_status === "CONDITIONAL" ? "border-amber-500/30" :
+                safety_assessment.safety_status === "UNKNOWN" ? "border-blue-500/30" :
+                "border-emerald-500/20"
+              )}>
                 <div className="flex flex-wrap items-center justify-between gap-3 border-b border-white/6 pb-3">
                   <div>
                     <span className="text-[10px] font-extrabold uppercase tracking-widest text-slate-400">Action Categorization (5-Tier Safety Filter)</span>
                     <h4 className="text-base font-black text-slate-100 mt-0.5 flex items-center gap-2">
                       <span className={cn(
                         "w-2.5 h-2.5 rounded-full inline-block",
-                        safety_assessment.safety_status === "BLOCKED" ? "bg-red-500 animate-ping" : "bg-emerald-500"
+                        safety_assessment.safety_status === "ESCALATE" ? "bg-purple-400 animate-pulse" :
+                        safety_assessment.safety_status === "BLOCKED" ? "bg-red-500 animate-ping" :
+                        safety_assessment.safety_status === "CONDITIONAL" ? "bg-amber-400" :
+                        safety_assessment.safety_status === "UNKNOWN" ? "bg-blue-400" :
+                        "bg-emerald-500"
                       )} />
-                      {safety_assessment.safety_status}: {safety_assessment.blocked_action}
+                      <span className={cn(
+                        safety_assessment.safety_status === "ESCALATE" ? "text-purple-300" :
+                        safety_assessment.safety_status === "BLOCKED" ? "text-red-400" :
+                        safety_assessment.safety_status === "CONDITIONAL" ? "text-amber-300" :
+                        safety_assessment.safety_status === "UNKNOWN" ? "text-blue-300" :
+                        "text-emerald-400"
+                      )}>{safety_assessment.safety_status}</span>: {safety_assessment.blocked_action}
                     </h4>
                   </div>
                   {safety_assessment.counterfactual_analysis_target && (
@@ -573,6 +624,54 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                     </div>
                   )}
                 </div>
+
+                {/* CONDITIONAL Human-in-the-Loop Site Manager Verification Box */}
+                {safety_assessment.safety_status === "CONDITIONAL" && (
+                  <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-4 mt-2">
+                    <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                      <div className="space-y-1">
+                        <div className="flex items-center gap-2">
+                          <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                          <span className="text-xs font-black uppercase tracking-wider text-amber-300">
+                            Site Manager Control Verification Required
+                          </span>
+                        </div>
+                        <p className="text-xs text-slate-300 leading-relaxed max-w-2xl">
+                          Statutory clearance requires physical confirmation of on-site safety controls before trade-off continuation can proceed.
+                        </p>
+                      </div>
+
+                      {tradeoff_reconciliation.decision === "pending_verification" && onConfirmControlsVerified ? (
+                        <button
+                          type="button"
+                          disabled={isVerifyingControls}
+                          onClick={onConfirmControlsVerified}
+                          className="inline-flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-4 py-2.5 text-xs transition shadow-lg shadow-amber-500/20 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                        >
+                          {isVerifyingControls ? (
+                            <>
+                              <svg className="h-3.5 w-3.5 animate-spin text-slate-950" fill="none" viewBox="0 0 24 24">
+                                <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                                <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                              </svg>
+                              Re-evaluating Trade-off...
+                            </>
+                          ) : (
+                            <>
+                              <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                              Confirm Controls Verified
+                            </>
+                          )}
+                        </button>
+                      ) : data.controls_verified ? (
+                        <span className="inline-flex items-center gap-1.5 rounded-lg border border-emerald-500/30 bg-emerald-500/20 px-3 py-1.5 text-xs font-bold text-emerald-300 shrink-0">
+                          <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                          Controls Verified by Site Manager
+                        </span>
+                      ) : null}
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
@@ -768,8 +867,14 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                     <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-slate-500">Reconciliation Stage</p>
                     <span className={cn(
                       "inline-flex items-center rounded-full border px-2 py-0.5 text-[9px] font-bold tracking-wider",
-                      tradeoff_reconciliation.decision === "halt" ? "bg-red-500/10 text-red-400 border-red-500/25" : "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
-                    )}>RECONCILED</span>
+                      tradeoff_reconciliation.decision === "halt" 
+                        ? "bg-red-500/10 text-red-400 border-red-500/25" 
+                        : tradeoff_reconciliation.decision === "pending_verification"
+                        ? "bg-amber-500/10 text-amber-400 border-amber-500/25"
+                        : "bg-emerald-500/10 text-emerald-400 border-emerald-500/25"
+                    )}>
+                      {tradeoff_reconciliation.decision === "pending_verification" ? "PENDING VERIFICATION" : "RECONCILED"}
+                    </span>
                   </div>
                   <h3 className="text-xs font-bold text-slate-400 mb-1">Decision Rationale</h3>
                   <p className="text-sm text-slate-200 leading-relaxed font-light">{tradeoff_reconciliation.reasoning}</p>
@@ -784,13 +889,19 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                     "inline-flex items-center gap-3 rounded-2xl border px-5 py-3.5",
                     tradeoff_reconciliation.decision === "halt"
                       ? "bg-red-500/10 border-red-500/30 text-red-400"
+                      : tradeoff_reconciliation.decision === "pending_verification"
+                      ? "bg-amber-500/10 border-amber-500/30 text-amber-400"
                       : "bg-emerald-500/10 border-emerald-500/30 text-emerald-400"
                   )}>
                     <span className={cn(
                       "h-2.5 w-2.5 rounded-full",
-                      tradeoff_reconciliation.decision === "halt" ? "bg-red-500 animate-ping" : "bg-emerald-500"
+                      tradeoff_reconciliation.decision === "halt" ? "bg-red-500 animate-ping" : 
+                      tradeoff_reconciliation.decision === "pending_verification" ? "bg-amber-400 animate-pulse" : 
+                      "bg-emerald-500"
                     )} />
-                    <span className="text-xl font-black uppercase tracking-wider">{tradeoff_reconciliation.decision}</span>
+                    <span className="text-xl font-black uppercase tracking-wider">
+                      {tradeoff_reconciliation.decision === "pending_verification" ? "PENDING VERIFICATION" : tradeoff_reconciliation.decision}
+                    </span>
                   </div>
                 </div>
 
@@ -808,6 +919,44 @@ export default function ReasoningTrace({ data, rawText, onReset }: ReasoningTrac
                 </div>
               </div>
             </div>
+
+            {/* CONDITIONAL Verification Banner in Stage 4 if pending */}
+            {tradeoff_reconciliation.decision === "pending_verification" && onConfirmControlsVerified && (
+              <div className="rounded-xl border border-amber-500/30 bg-amber-500/10 p-5 flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+                <div className="space-y-1">
+                  <div className="flex items-center gap-2">
+                    <ShieldAlert className="w-4 h-4 text-amber-400 shrink-0" />
+                    <p className="text-xs font-bold text-amber-300 uppercase tracking-wider">
+                      Action Required: Site Manager Control Verification
+                    </p>
+                  </div>
+                  <p className="text-xs text-slate-300">
+                    Work continuation is blocked under regulatory rules until required field controls are confirmed verified.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={isVerifyingControls}
+                  onClick={onConfirmControlsVerified}
+                  className="inline-flex items-center gap-2 rounded-xl bg-amber-500 hover:bg-amber-400 text-slate-950 font-bold px-5 py-2.5 text-xs transition shadow-lg shadow-amber-500/25 disabled:opacity-50 disabled:cursor-not-allowed shrink-0"
+                >
+                  {isVerifyingControls ? (
+                    <>
+                      <svg className="h-4 w-4 animate-spin text-slate-950" fill="none" viewBox="0 0 24 24">
+                        <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
+                        <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z" />
+                      </svg>
+                      Re-evaluating Trade-off...
+                    </>
+                  ) : (
+                    <>
+                      <CheckCircle2 className="w-4 h-4 text-slate-950" />
+                      Confirm Controls Verified
+                    </>
+                  )}
+                </button>
+              </div>
+            )}
 
             {/* Directives grid */}
             <div className="grid grid-cols-1 md:grid-cols-2 gap-5 pt-2">

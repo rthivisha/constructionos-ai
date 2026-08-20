@@ -67,12 +67,15 @@ class PostgresCursorWrapper:
     def execute(self, sql: str, params=None):
         translated = self._translate_sql(sql)
         if params is not None:
-            return self._cursor.execute(translated, params)
-        return self._cursor.execute(translated)
+            self._cursor.execute(translated, params)
+        else:
+            self._cursor.execute(translated)
+        return self
 
     def executemany(self, sql: str, seq_of_params):
         translated = self._translate_sql(sql)
-        return self._cursor.executemany(translated, seq_of_params)
+        self._cursor.executemany(translated, seq_of_params)
+        return self
 
     def fetchone(self):
         row = self._cursor.fetchone()
@@ -125,14 +128,17 @@ def get_db_connection():
     db_url = get_database_url()
     if db_url and is_postgres():
         import psycopg2
-        pg_conn = psycopg2.connect(db_url)
-        return PostgresConnectionWrapper(pg_conn)
-    else:
-        import sqlite3
-        conn = sqlite3.connect(DB_PATH)
-        conn.execute("PRAGMA foreign_keys = ON;")
-        conn.row_factory = sqlite3.Row
-        return conn
+        try:
+            pg_conn = psycopg2.connect(db_url, connect_timeout=5)
+            return PostgresConnectionWrapper(pg_conn)
+        except Exception as e:
+            logger.warning(f"PostgreSQL connection failed ({e}); falling back to local SQLite: {DB_PATH}")
+
+    import sqlite3
+    conn = sqlite3.connect(DB_PATH)
+    conn.execute("PRAGMA foreign_keys = ON;")
+    conn.row_factory = sqlite3.Row
+    return conn
 
 
 def init_db():
